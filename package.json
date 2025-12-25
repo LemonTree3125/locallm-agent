@@ -1,0 +1,25 @@
+{
+  "name": "locallm-agent",
+  "version": "1.0.0",
+  "description": "Electron desktop app for local LLM interaction via Ollama",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --enable-logging"
+  },
+  "keywords": [
+    "electron",
+    "ollama",
+    "llm",
+    "ai",
+    "chat"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "ollama": "^0.6.3"
+  },
+  "devDependencies": {
+    "electron": "^33.2.1"
+  }
+}

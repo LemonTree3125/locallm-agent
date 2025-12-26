@@ -9,6 +9,7 @@ const elements = {
   modelSelectorDesc: document.getElementById('model-selector-desc'),
   modelSelectDropdown: document.getElementById('model-select-dropdown'),
   newChatBtn: document.getElementById('new-chat-btn'),
+  newCouncilChatBtn: document.getElementById('new-council-chat-btn'),
   ollamaStatus: document.getElementById('ollama-status'),
   modelInfoSection: document.getElementById('model-info-section'),
   modelInfoContent: document.getElementById('model-info-content'),
@@ -102,6 +103,7 @@ const state = {
   conversationHistory: [],
   isGenerating: false,
   currentChatId: null,
+  currentChatType: 'normal', // 'normal' or 'council'
   savedChats: [],
   modelLoaded: false,
   modelStatusInterval: null,
@@ -113,6 +115,13 @@ const state = {
   // Model capabilities cache (from Ollama API)
   modelCapabilitiesCache: new Map(), // modelName -> { capabilities, parameters, contextLength, family }
   currentModelCapabilities: null, // Current model's capabilities object
+  // AI Council state
+  councilMode: false, // Whether council mode is active
+  councilRunning: false, // Whether a council session is in progress
+  councilStartTime: null, // Timestamp when council session started
+  councilDurationInterval: null, // Interval for updating duration display
+  councilProgressDiv: null, // Reference to the progress message element in chat
+  councilPlan: [], // Current plan tasks
 };
 
 // ============================================
@@ -533,8 +542,8 @@ async function persistChat(chat) {
   }
 }
 
-async function createNewChat() {
-  const result = await window.electronAPI.createChat(state.currentModel);
+async function createNewChat(type = 'normal') {
+  const result = await window.electronAPI.createChat(state.currentModel, type);
   if (!result?.success || !result.chat) {
     throw new Error(result?.error || 'Failed to create chat');
   }
@@ -547,6 +556,7 @@ async function createNewChat() {
       id: result.chat.id,
       title: result.chat.title,
       model: result.chat.model,
+      type: result.chat.type || 'normal',
       createdAt: result.chat.createdAt,
       updatedAt: result.chat.updatedAt,
       messageCount: result.chat.messages?.length || 0,
@@ -562,13 +572,15 @@ async function updateCurrentChat() {
 
   chat.messages = [...state.conversationHistory];
   chat.model = state.currentModel;
+  chat.type = state.currentChatType; // Preserve chat type
   chat.updatedAt = new Date().toISOString();
 
-  // Update title from first user message if still "New Chat"
-  if (chat.title === 'New Chat' && chat.messages.length > 0) {
+  // Update title from first user message if still "New Chat" or "New Council Chat"
+  if ((chat.title === 'New Chat' || chat.title === 'New Council Chat') && chat.messages.length > 0) {
     const firstUserMsg = chat.messages.find(m => m.role === 'user');
     if (firstUserMsg) {
-      chat.title = firstUserMsg.content.slice(0, 50) + (firstUserMsg.content.length > 50 ? '...' : '');
+      const prefix = chat.type === 'council' ? '🏛️ ' : '';
+      chat.title = prefix + firstUserMsg.content.slice(0, 50) + (firstUserMsg.content.length > 50 ? '...' : '');
     }
   }
 
@@ -584,6 +596,13 @@ async function loadChat(chatId) {
   // Allow switching even during generation - the generation will continue in background
   state.currentChatId = chatId;
   state.conversationHistory = [...chat.messages];
+  
+  // Set chat type and update council mode accordingly
+  state.currentChatType = chat.type || 'normal';
+  const isCouncilChat = state.currentChatType === 'council';
+  
+  // Update council mode state
+  state.councilMode = isCouncilChat;
   
   // Set model if available
   if (chat.model && state.models.some(m => m.name === chat.model)) {
@@ -710,16 +729,18 @@ function renderChatList() {
   elements.chatList.innerHTML = state.savedChats.map(chat => {
     const isActive = chat.id === state.currentChatId;
     const isGenerating = state.activeGenerations.has(chat.id);
+    const isCouncilChat = chat.type === 'council';
     const date = new Date(chat.updatedAt);
     const timeStr = formatRelativeTime(date);
     const msgCount = typeof chat.messageCount === 'number' ? chat.messageCount : (chat.messages?.length || 0);
     const generatingIndicator = isGenerating ? '<span class=\"chat-generating-indicator\">●</span>' : '';
+    const typeIcon = isCouncilChat ? '<span class=\"chat-type-icon council\" title=\"Council Chat\">🏛️</span>' : '<span class=\"chat-type-icon normal\" title=\"Normal Chat\">💬</span>';
     
     return `
-      <div class="chat-item ${isActive ? 'active' : ''} ${isGenerating ? 'generating' : ''}" data-chat-id="${chat.id}">
+      <div class="chat-item ${isActive ? 'active' : ''} ${isGenerating ? 'generating' : ''} ${isCouncilChat ? 'council-chat' : ''}" data-chat-id="${chat.id}">
         <div class="chat-item-content" onclick="window.loadChat('${chat.id}')">
-          <div class="chat-item-title">${generatingIndicator}${escapeHtml(chat.title)}</div>
-          <div class="chat-item-meta">${isGenerating ? 'Generating...' : timeStr} · ${msgCount} messages</div>
+          <div class="chat-item-title">${generatingIndicator}${typeIcon}${escapeHtml(chat.title)}</div>
+          <div class="chat-item-meta">${isGenerating ? 'Generating...' : timeStr} · ${msgCount} messages${isCouncilChat ? ' · Council' : ''}</div>
         </div>
         <div class="chat-item-actions">
           <button class="chat-item-btn" onclick="window.promptRenameChat('${chat.id}')" title="Rename">✏️</button>
@@ -780,14 +801,63 @@ function renderChatMessages() {
 // Expose functions to window for onclick handlers
 window.loadChat = loadChat;
 window.deleteChat = deleteChat;
+
+// Rename modal state
+let pendingRenameChatId = null;
+
 window.promptRenameChat = function(chatId) {
   const chat = state.savedChats.find(c => c.id === chatId);
   if (!chat) return;
-  const newTitle = prompt('Enter new name:', chat.title);
-  if (newTitle !== null) {
-    void renameChat(chatId, newTitle.trim());
-  }
+  
+  pendingRenameChatId = chatId;
+  const renameInput = document.getElementById('rename-input');
+  const renameModal = document.getElementById('rename-modal');
+  
+  renameInput.value = chat.title;
+  renameModal.style.display = 'flex';
+  renameInput.focus();
+  renameInput.select();
 };
+
+function setupRenameModal() {
+  const renameModal = document.getElementById('rename-modal');
+  const renameInput = document.getElementById('rename-input');
+  const closeBtn = document.getElementById('close-rename-modal');
+  const cancelBtn = document.getElementById('rename-cancel-btn');
+  const confirmBtn = document.getElementById('rename-confirm-btn');
+  
+  const closeModal = () => {
+    renameModal.style.display = 'none';
+    pendingRenameChatId = null;
+  };
+  
+  const confirmRename = () => {
+    if (pendingRenameChatId && renameInput.value.trim()) {
+      void renameChat(pendingRenameChatId, renameInput.value.trim());
+    }
+    closeModal();
+  };
+  
+  closeBtn?.addEventListener('click', closeModal);
+  cancelBtn?.addEventListener('click', closeModal);
+  confirmBtn?.addEventListener('click', confirmRename);
+  
+  renameInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      confirmRename();
+    } else if (e.key === 'Escape') {
+      closeModal();
+    }
+  });
+  
+  // Close on backdrop click
+  renameModal?.addEventListener('click', (e) => {
+    if (e.target === renameModal) {
+      closeModal();
+    }
+  });
+}
 
 // Settings element mappings with metadata for dynamic behavior
 const settingsMap = {
@@ -1168,10 +1238,413 @@ function renderAttachmentPreviews() {
 window.removeAttachment = removeAttachment;
 
 // ============================================
+// AI Council Functions (Inline Progress)
+// ============================================
+
+/**
+ * Create the inline progress message element
+ */
+function createCouncilProgressMessage() {
+  const div = document.createElement('div');
+  div.className = 'message message-assistant message-council-progress';
+  div.innerHTML = `
+    <div class="council-progress-header">
+      <span class="council-progress-icon">🏛️</span>
+      <span class="council-progress-title">AI Council Processing</span>
+      <span class="council-progress-timer" id="council-timer">0s</span>
+    </div>
+    <div class="council-progress-phases">
+      <div class="council-progress-phase" id="progress-phase-1" data-status="pending">
+        <span class="phase-status-icon">⏳</span>
+        <span class="phase-name">Phase 1: Chairman Planning</span>
+        <span class="phase-status-text">Pending</span>
+      </div>
+      <div class="council-progress-phase" id="progress-phase-2" data-status="pending">
+        <span class="phase-status-icon">⏳</span>
+        <span class="phase-name">Phase 2: Council Execution</span>
+        <span class="phase-status-text">Pending</span>
+      </div>
+      <div class="council-progress-phase" id="progress-phase-3" data-status="pending">
+        <span class="phase-status-icon">⏳</span>
+        <span class="phase-name">Phase 3: Final Synthesis</span>
+        <span class="phase-status-text">Pending</span>
+      </div>
+    </div>
+    <div class="council-progress-tasks" id="progress-tasks" style="display: none;">
+    </div>
+  `;
+  return div;
+}
+
+/**
+ * Update progress phase status in the inline message
+ */
+function updateProgressPhase(phaseNum, status, statusText = null) {
+  if (!state.councilProgressDiv) return;
+  
+  const phaseEl = state.councilProgressDiv.querySelector(`#progress-phase-${phaseNum}`);
+  if (!phaseEl) return;
+  
+  phaseEl.setAttribute('data-status', status);
+  
+  const iconEl = phaseEl.querySelector('.phase-status-icon');
+  const textEl = phaseEl.querySelector('.phase-status-text');
+  
+  const icons = { 'pending': '⏳', 'running': '⚙️', 'complete': '✅', 'error': '❌' };
+  const defaultTexts = { 'pending': 'Pending', 'running': 'Running...', 'complete': 'Complete', 'error': 'Error' };
+  
+  if (iconEl) iconEl.textContent = icons[status] || '⏳';
+  if (textEl) textEl.textContent = statusText || defaultTexts[status] || status;
+}
+
+/**
+ * Display tasks in progress message after Phase 1
+ */
+function displayProgressTasks(plan) {
+  if (!state.councilProgressDiv) return;
+  
+  state.councilPlan = plan;
+  const tasksDiv = state.councilProgressDiv.querySelector('#progress-tasks');
+  if (!tasksDiv) return;
+  
+  tasksDiv.style.display = 'block';
+  tasksDiv.innerHTML = `
+    <div class="progress-tasks-header">Tasks:</div>
+    ${plan.map((task, i) => `
+      <div class="progress-task" id="progress-task-${i}" data-status="pending">
+        <span class="task-status-icon">⏳</span>
+        <span class="task-role">${escapeHtml(task.role)}</span>
+        <span class="task-desc">${escapeHtml(task.task_description.substring(0, 60))}${task.task_description.length > 60 ? '...' : ''}</span>
+        ${task.needs_search ? '<span class="task-search">🔍</span>' : ''}
+      </div>
+    `).join('')}
+  `;
+}
+
+/**
+ * Update task status in progress message
+ */
+function updateProgressTask(taskIndex, status) {
+  if (!state.councilProgressDiv) return;
+  
+  const taskEl = state.councilProgressDiv.querySelector(`#progress-task-${taskIndex}`);
+  if (!taskEl) return;
+  
+  taskEl.setAttribute('data-status', status);
+  
+  const iconEl = taskEl.querySelector('.task-status-icon');
+  const icons = { 'pending': '⏳', 'running': '⚙️', 'complete': '✅', 'error': '❌' };
+  if (iconEl) iconEl.textContent = icons[status] || '⏳';
+}
+
+/**
+ * Set up IPC listeners for council events
+ */
+function setupCouncilListeners() {
+  // Phase start
+  window.electronAPI.onCouncilPhaseStart((data) => {
+    console.log('[Council] Phase started:', data);
+    
+    let statusText = 'Running...';
+    if (data.phase === 1) statusText = 'Analyzing query...';
+    else if (data.phase === 2) statusText = `Executing ${data.taskCount || 0} tasks...`;
+    else if (data.phase === 3) statusText = 'Synthesizing...';
+    
+    updateProgressPhase(data.phase, 'running', statusText);
+  });
+  
+  // Phase complete
+  window.electronAPI.onCouncilPhaseComplete((data) => {
+    console.log('[Council] Phase complete:', data);
+    updateProgressPhase(data.phase, 'complete');
+    
+    // Display tasks after Phase 1
+    if (data.phase === 1 && data.result && Array.isArray(data.result)) {
+      displayProgressTasks(data.result);
+    }
+  });
+  
+  // Task start
+  window.electronAPI.onCouncilTaskStart((data) => {
+    console.log('[Council] Task started:', data);
+    updateProgressTask(data.taskIndex, 'running');
+  });
+  
+  // Task complete
+  window.electronAPI.onCouncilTaskComplete((data) => {
+    console.log('[Council] Task complete:', data);
+    updateProgressTask(data.taskIndex, data.success ? 'complete' : 'error');
+  });
+  
+  // Tool call
+  window.electronAPI.onCouncilToolCall((data) => {
+    console.log('[Council] Tool call:', data);
+  });
+}
+
+/**
+ * Start the duration timer for council session
+ */
+function startCouncilDurationTimer() {
+  state.councilStartTime = Date.now();
+  
+  if (state.councilDurationInterval) {
+    clearInterval(state.councilDurationInterval);
+  }
+  
+  state.councilDurationInterval = setInterval(() => {
+    if (!state.councilProgressDiv) return;
+    
+    const elapsed = Math.floor((Date.now() - state.councilStartTime) / 1000);
+    const mins = Math.floor(elapsed / 60);
+    const secs = elapsed % 60;
+    
+    const timerEl = state.councilProgressDiv.querySelector('#council-timer');
+    if (timerEl) {
+      timerEl.textContent = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+    }
+  }, 1000);
+}
+
+/**
+ * Stop the duration timer
+ */
+function stopCouncilDurationTimer() {
+  if (state.councilDurationInterval) {
+    clearInterval(state.councilDurationInterval);
+    state.councilDurationInterval = null;
+  }
+}
+
+/**
+ * Send a message using the AI Council workflow
+ */
+async function sendCouncilMessage(query) {
+  if (state.councilRunning) {
+    showNotification('A council session is already in progress');
+    return;
+  }
+  
+  console.log('[Council] Starting session for query:', query);
+  
+  // Update status
+  state.councilRunning = true;
+  state.councilPlan = [];
+  
+  // Add user message to chat
+  state.conversationHistory.push({ role: 'user', content: query });
+  appendMessage('user', query);
+  await updateCurrentChat();
+  
+  // Hide welcome message
+  hideWelcomeMessage();
+  
+  // Create and append progress message
+  state.councilProgressDiv = createCouncilProgressMessage();
+  elements.messages.appendChild(state.councilProgressDiv);
+  scrollToBottom();
+  
+  // Start duration timer
+  startCouncilDurationTimer();
+  
+  try {
+    // Call the council API
+    const result = await window.electronAPI.councilProcess(query);
+    
+    // Stop timer
+    stopCouncilDurationTimer();
+    
+    // Remove progress message
+    if (state.councilProgressDiv) {
+      state.councilProgressDiv.remove();
+      state.councilProgressDiv = null;
+    }
+    
+    if (result.success) {
+      // Add to conversation history
+      state.conversationHistory.push({ 
+        role: 'assistant', 
+        content: result.finalResponse,
+        councilResult: result
+      });
+      
+      // Display result in chat
+      appendCouncilResultMessage(result);
+      
+      // Save chat
+      await updateCurrentChat();
+      
+      showNotification('Council session completed successfully');
+    } else {
+      showNotification(`Council error: ${result.error}`);
+      appendMessage('assistant', `**Council Error:** ${result.error}`, true);
+    }
+  } catch (error) {
+    console.error('[Council] Error:', error);
+    stopCouncilDurationTimer();
+    
+    // Remove progress message on error
+    if (state.councilProgressDiv) {
+      state.councilProgressDiv.remove();
+      state.councilProgressDiv = null;
+    }
+    
+    showNotification(`Council error: ${error.message}`);
+    appendMessage('assistant', `**Council Error:** ${error.message}`, true);
+  } finally {
+    state.councilRunning = false;
+    setGenerating(false);
+  }
+}
+
+/**
+ * Append a council result message to the chat
+ */
+function appendCouncilResultMessage(result) {
+  const messageDiv = document.createElement('div');
+  messageDiv.className = 'message message-assistant message-council';
+  
+  // Build the council result header
+  const headerHtml = `
+    <div class="council-result-header">
+      <span>🏛️</span>
+      <h4>AI Council Response</h4>
+    </div>
+    <div class="council-result-meta">
+      <span class="council-meta-item">
+        <span class="council-meta-icon">⏱️</span>
+        ${(result.metadata?.duration / 1000).toFixed(1)}s
+      </span>
+      <span class="council-meta-item">
+        <span class="council-meta-icon">📋</span>
+        ${result.metadata?.taskCount || 0} tasks
+      </span>
+      <span class="council-meta-item">
+        <span class="council-meta-icon">✅</span>
+        ${result.metadata?.successfulTasks || 0} successful
+      </span>
+    </div>
+  `;
+  
+  // Build expandable sections for plan, thinking, and reports
+  let sectionsHtml = '';
+  
+  // Phase 1: Chairman's Thinking section
+  if (result.phaseData?.phase1?.thinking) {
+    sectionsHtml += `
+      <div class="council-section council-thinking-section" onclick="this.classList.toggle('expanded')">
+        <div class="council-section-header">
+          <span class="council-section-toggle">▶</span>
+          <span class="council-section-title">🧠 Chairman's Thinking (Phase 1)</span>
+        </div>
+        <div class="council-section-content">
+          <pre class="council-thinking-content">${escapeHtml(result.phaseData.phase1.thinking)}</pre>
+        </div>
+      </div>
+    `;
+  }
+  
+  // Plan section
+  if (result.plan && result.plan.length > 0) {
+    sectionsHtml += `
+      <div class="council-section" onclick="this.classList.toggle('expanded')">
+        <div class="council-section-header">
+          <span class="council-section-toggle">▶</span>
+          <span class="council-section-title">📋 Execution Plan (${result.plan.length} tasks)</span>
+        </div>
+        <div class="council-section-content">
+          ${result.plan.map((task, i) => `
+            <div class="council-report">
+              <div class="council-report-role">
+                ${i + 1}. ${escapeHtml(task.role)}
+                ${task.needs_search ? ' 🔍' : ''}
+              </div>
+              <div class="council-report-content">${escapeHtml(task.task_description)}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+  
+  // Council reports section with individual thinking
+  if (result.councilResults && result.councilResults.length > 0) {
+    sectionsHtml += `
+      <div class="council-section" onclick="event.stopPropagation(); this.classList.toggle('expanded')">
+        <div class="council-section-header">
+          <span class="council-section-toggle">▶</span>
+          <span class="council-section-title">👥 Council Reports (${result.councilResults.length})</span>
+        </div>
+        <div class="council-section-content">
+          ${result.councilResults.map((report, i) => `
+            <div class="council-report">
+              <div class="council-report-role">
+                ${report.success ? '✅' : '❌'} ${escapeHtml(report.role)}
+              </div>
+              ${report.thinking ? `
+                <div class="council-report-thinking" onclick="event.stopPropagation(); this.classList.toggle('expanded')">
+                  <div class="council-thinking-toggle">🧠 View Thinking</div>
+                  <pre class="council-thinking-content">${escapeHtml(report.thinking)}</pre>
+                </div>
+              ` : ''}
+              <div class="council-report-content">${escapeHtml(report.response?.substring(0, 500) || '')}${report.response?.length > 500 ? '...' : ''}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+  
+  // Phase 3: Synthesis Thinking section
+  if (result.phaseData?.phase3?.thinking) {
+    sectionsHtml += `
+      <div class="council-section council-thinking-section" onclick="this.classList.toggle('expanded')">
+        <div class="council-section-header">
+          <span class="council-section-toggle">▶</span>
+          <span class="council-section-title">🧠 Synthesis Thinking (Phase 3)</span>
+        </div>
+        <div class="council-section-content">
+          <pre class="council-thinking-content">${escapeHtml(result.phaseData.phase3.thinking)}</pre>
+        </div>
+      </div>
+    `;
+  }
+  
+  // Final response
+  const responseHtml = `
+    <div class="message-content">
+      ${renderMarkdown(result.finalResponse || '')}
+    </div>
+  `;
+  
+  messageDiv.innerHTML = headerHtml + sectionsHtml + responseHtml;
+  
+  elements.messages.appendChild(messageDiv);
+  scrollToBottom();
+  
+  // Highlight code blocks
+  messageDiv.querySelectorAll('pre code').forEach((block) => {
+    hljs.highlightElement(block);
+  });
+}
+
+/**
+ * Create a text summary of the council result for storage
+ */
+function createCouncilResultMessage(result) {
+  let message = `**AI Council Response**\n\n`;
+  message += `*Duration: ${(result.metadata?.duration / 1000).toFixed(1)}s | `;
+  message += `Tasks: ${result.metadata?.successfulTasks}/${result.metadata?.taskCount}*\n\n`;
+  message += result.finalResponse || '';
+  return message;
+}
+
+// ============================================
 // Initialization
 // ============================================
 async function init() {
   setupEventListeners();
+  setupRenameModal();
   await loadSavedChats();
   await checkOllamaStatus();
   
@@ -1206,7 +1679,12 @@ function setupEventListeners() {
   });
   
   // New chat
-  elements.newChatBtn.addEventListener('click', startNewChat);
+  elements.newChatBtn.addEventListener('click', () => startNewChat('normal'));
+  
+  // New council chat
+  if (elements.newCouncilChatBtn) {
+    elements.newCouncilChatBtn.addEventListener('click', () => startNewChat('council'));
+  }
   
   // Clear all chats
   elements.clearAllChatsBtn.addEventListener('click', clearAllChats);
@@ -1294,6 +1772,9 @@ function setupEventListeners() {
       }
     });
   }
+  
+  // Set up council IPC listeners
+  setupCouncilListeners();
 }
 
 function getModelDescriptor(model) {
@@ -1701,6 +2182,21 @@ async function sendMessage() {
   // Need either content or attachments (with content) for vision models
   if (!content || !state.currentModel) return;
   
+  // Check if council mode is active - route to council workflow
+  if (state.councilMode) {
+    // Clear input first
+    elements.chatInput.value = '';
+    handleInputChange();
+    clearAttachments();
+    
+    // Start generation UI
+    setGenerating(true);
+    
+    // Use council workflow
+    await sendCouncilMessage(content);
+    return;
+  }
+  
   // Check if THIS chat already has an active generation
   if (state.activeGenerations.has(state.currentChatId)) return;
   
@@ -1916,16 +2412,29 @@ async function stopGeneration() {
   }
 }
 
-async function startNewChat() {
-  // Create new chat in storage
-  const chat = await createNewChat();
+async function startNewChat(type = null) {
+  // Use the provided type, or default based on current council mode
+  const chatType = type || (state.councilMode ? 'council' : 'normal');
+  
+  // Create new chat in storage with type
+  const chat = await createNewChat(chatType);
   state.currentChatId = chat.id;
+  state.currentChatType = chatType;
   state.conversationHistory = [];
+  
+  // Sync council mode with new chat type
+  const isCouncil = chatType === 'council';
+  state.councilMode = isCouncil;
+  
+  const welcomeTitle = isCouncil ? 'AI Council Mode' : 'Welcome to LocalLM Agent';
+  const welcomeDesc = isCouncil 
+    ? 'Your query will be processed by a Chairman (planner) and Council Members (specialists).'
+    : 'Select a model and start chatting with your local AI.';
   
   elements.messages.innerHTML = `
     <div class="welcome-message">
-      <h2>Welcome to LocalLM Agent</h2>
-      <p>Select a model and start chatting with your local AI.</p>
+      <h2>${welcomeTitle}</h2>
+      <p>${welcomeDesc}</p>
     </div>
   `;
   elements.generationStats.textContent = '';

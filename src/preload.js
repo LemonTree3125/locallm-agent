@@ -101,10 +101,93 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   listChats: () => ipcRenderer.invoke('chats:list'),
   loadChat: (chatId) => ipcRenderer.invoke('chats:load', chatId),
-  createChat: (model = null) => ipcRenderer.invoke('chats:create', { model }),
+  createChat: (model = null, type = 'normal') => ipcRenderer.invoke('chats:create', { model, type }),
   updateChat: (chat) => ipcRenderer.invoke('chats:update', chat),
   renameChat: (chatId, title) => ipcRenderer.invoke('chats:rename', { chatId, title }),
   deleteChat: (chatId) => ipcRenderer.invoke('chats:delete', chatId),
   clearChats: () => ipcRenderer.invoke('chats:clear'),
   importChats: (legacyChats) => ipcRenderer.invoke('chats:import', legacyChats),
+
+  // ============================================
+  // AI Council - Dynamic Multi-Agent System
+  // ============================================
+
+  /**
+   * Check AI Council service health and model availability
+   * @returns {Promise<{success: boolean, healthy: boolean, requiredModels: object}>}
+   */
+  councilHealthCheck: () => ipcRenderer.invoke('council:health-check'),
+
+  /**
+   * Process a query using the AI Council workflow
+   * @param {string} query - The user's query to process
+   * @param {object} options - Optional configuration overrides
+   * @returns {Promise<{success: boolean, finalResponse?: string, plan?: array, councilResults?: array}>}
+   */
+  councilProcess: (query, options = {}) => 
+    ipcRenderer.invoke('council:process', { query, options }),
+
+  /**
+   * Get current AI Council configuration
+   * @returns {Promise<{success: boolean, config: object}>}
+   */
+  councilGetConfig: () => ipcRenderer.invoke('council:get-config'),
+
+  /**
+   * Update AI Council configuration
+   * @param {object} config - Configuration to update
+   * @returns {Promise<{success: boolean, config: object}>}
+   */
+  councilSetConfig: (config) => ipcRenderer.invoke('council:set-config', config),
+
+  /**
+   * Listen for council phase start events
+   * @param {function} callback - Called with phase data {phase, name, taskCount?}
+   */
+  onCouncilPhaseStart: (callback) => {
+    ipcRenderer.on('council:phase-start', (_event, data) => callback(data));
+  },
+
+  /**
+   * Listen for council phase complete events
+   * @param {function} callback - Called with phase data {phase, result|results}
+   */
+  onCouncilPhaseComplete: (callback) => {
+    ipcRenderer.on('council:phase-complete', (_event, data) => callback(data));
+  },
+
+  /**
+   * Listen for council task start events
+   * @param {function} callback - Called with task data {taskIndex, role, task_description}
+   */
+  onCouncilTaskStart: (callback) => {
+    ipcRenderer.on('council:task-start', (_event, data) => callback(data));
+  },
+
+  /**
+   * Listen for council task complete events
+   * @param {function} callback - Called with task data {taskIndex, role, success, error?}
+   */
+  onCouncilTaskComplete: (callback) => {
+    ipcRenderer.on('council:task-complete', (_event, data) => callback(data));
+  },
+
+  /**
+   * Listen for council tool call events
+   * @param {function} callback - Called with tool data {taskIndex, toolName, args}
+   */
+  onCouncilToolCall: (callback) => {
+    ipcRenderer.on('council:tool-call', (_event, data) => callback(data));
+  },
+
+  /**
+   * Remove all council event listeners
+   */
+  removeCouncilListeners: () => {
+    ipcRenderer.removeAllListeners('council:phase-start');
+    ipcRenderer.removeAllListeners('council:phase-complete');
+    ipcRenderer.removeAllListeners('council:task-start');
+    ipcRenderer.removeAllListeners('council:task-complete');
+    ipcRenderer.removeAllListeners('council:tool-call');
+  },
 });

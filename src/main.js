@@ -5,6 +5,9 @@ const { Ollama } = require('ollama');
 const { tavily } = require('@tavily/core');
 require('dotenv').config();
 
+// Import AI Council Service
+const { AICouncilService, setSearchFunction } = require('./aiCouncilService');
+
 // Initialize Ollama client pointing to local instance
 const ollama = new Ollama({ host: 'http://127.0.0.1:11434' });
 
@@ -91,6 +94,7 @@ function buildChatSummary(chat) {
     id: chat.id,
     title: chat.title || 'New Chat',
     model: chat.model || null,
+    type: chat.type || 'normal', // 'normal' or 'council'
     createdAt: chat.createdAt,
     updatedAt: chat.updatedAt,
     messageCount: Array.isArray(chat.messages) ? chat.messages.length : 0,
@@ -344,14 +348,15 @@ ipcMain.handle('chats:load', async (_event, chatId) => {
   }
 });
 
-ipcMain.handle('chats:create', async (_event, { model = null } = {}) => {
+ipcMain.handle('chats:create', async (_event, { model = null, type = 'normal' } = {}) => {
   try {
     await ensureChatStoreDirs();
     const now = new Date().toISOString();
     const chat = {
       id: generateChatId(),
-      title: 'New Chat',
+      title: type === 'council' ? 'New Council Chat' : 'New Chat',
       model,
+      type, // 'normal' or 'council'
       createdAt: now,
       updatedAt: now,
       messages: [],
@@ -784,6 +789,136 @@ ipcMain.handle('ollama:abort', async () => {
     // Also call ollama.abort() to stop the underlying request
     ollama.abort();
     return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// ============================================
+// AI Council Service - Dynamic Multi-Agent System
+// ============================================
+
+// Initialize AI Council Service instance
+let councilService = null;
+
+/**
+ * Get or create the AI Council Service instance
+ * Lazily initialized to ensure searchWeb is available
+ */
+function getCouncilService() {
+  if (!councilService) {
+    // Inject the real Tavily search function
+    setSearchFunction(searchWeb);
+    
+    councilService = new AICouncilService({
+      debug: true,
+      // Progress callbacks - will be used for renderer updates
+      onPhaseStart: (data) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('council:phase-start', data);
+        }
+      },
+      onPhaseComplete: (data) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('council:phase-complete', data);
+        }
+      },
+      onTaskStart: (data) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('council:task-start', data);
+        }
+      },
+      onTaskComplete: (data) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('council:task-complete', data);
+        }
+      },
+      onToolCall: (data) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('council:tool-call', data);
+        }
+      }
+    });
+  }
+  return councilService;
+}
+
+// AI Council: Health Check
+ipcMain.handle('council:health-check', async () => {
+  try {
+    const council = getCouncilService();
+    const health = await council.healthCheck();
+    return { success: true, ...health };
+  } catch (error) {
+    console.error('[Council] Health check error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// AI Council: Process Query (Full Workflow)
+ipcMain.handle('council:process', async (event, { query, options = {} }) => {
+  try {
+    console.log('[Council] Processing query:', query);
+    
+    const council = getCouncilService();
+    
+    // Override models if specified in options
+    if (options.chairmanModel) {
+      council.chairmanModel = options.chairmanModel;
+    }
+    if (options.memberModel) {
+      council.memberModel = options.memberModel;
+    }
+    
+    const result = await council.processQuery(query);
+    
+    return { success: true, ...result };
+  } catch (error) {
+    console.error('[Council] Process error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// AI Council: Get Configuration
+ipcMain.handle('council:get-config', async () => {
+  try {
+    const council = getCouncilService();
+    return {
+      success: true,
+      config: {
+        chairmanModel: council.chairmanModel,
+        memberModel: council.memberModel,
+        baseUrl: council.baseUrl
+      }
+    };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// AI Council: Update Configuration
+ipcMain.handle('council:set-config', async (event, config) => {
+  try {
+    const council = getCouncilService();
+    
+    if (config.chairmanModel) {
+      council.chairmanModel = config.chairmanModel;
+    }
+    if (config.memberModel) {
+      council.memberModel = config.memberModel;
+    }
+    if (config.debug !== undefined) {
+      council.debug = config.debug;
+    }
+    
+    return {
+      success: true,
+      config: {
+        chairmanModel: council.chairmanModel,
+        memberModel: council.memberModel,
+        debug: council.debug
+      }
+    };
   } catch (error) {
     return { success: false, error: error.message };
   }

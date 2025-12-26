@@ -42,8 +42,9 @@
         </select>
       </div>
 
-      <div class="sidebar-section">
-        <button id="new-chat-btn" class="btn btn-primary">+ New Chat</button>
+      <div class="sidebar-section new-chat-section">
+        <button id="new-chat-btn" class="btn btn-primary new-chat-btn-normal">New Chat</button>
+        <button id="new-council-chat-btn" class="btn btn-secondary new-chat-btn-council">New Council</button>
       </div>
 
       <div class="sidebar-section chat-list-section">
@@ -505,6 +506,26 @@
             <li><kbd>Shift + Enter</kbd> - New line</li>
             <li><kbd>Ctrl + N</kbd> - New chat</li>
           </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Rename Chat Modal -->
+  <div id="rename-modal" class="modal" style="display: none;">
+    <div class="modal-content modal-small">
+      <div class="modal-header">
+        <h3>Rename Chat</h3>
+        <button class="modal-close" id="close-rename-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="rename-input">Chat name:</label>
+          <input type="text" id="rename-input" class="form-input" placeholder="Enter new name...">
+        </div>
+        <div class="modal-actions">
+          <button id="rename-cancel-btn" class="btn btn-secondary">Cancel</button>
+          <button id="rename-confirm-btn" class="btn btn-primary">Rename</button>
         </div>
       </div>
     </div>

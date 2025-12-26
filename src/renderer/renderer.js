@@ -126,6 +126,35 @@ const VISION_MODEL_PATTERNS = [
 ];
 
 // ============================================
+// Model Abilities (for the Model Info section)
+// ============================================
+// Per UI spec:
+// - Thinking: Deepseek, Qwen
+// - Tools: Qwen
+// - Vision: Gemma
+const THINKING_MODEL_PATTERNS = ['deepseek', 'qwen'];
+const TOOLS_MODEL_PATTERNS = ['qwen'];
+const ABILITY_VISION_MODEL_PATTERNS = ['gemma'];
+
+function isThinkingModel(modelName) {
+  if (!modelName || typeof modelName !== 'string') return false;
+  const lowerName = modelName.toLowerCase();
+  return THINKING_MODEL_PATTERNS.some(pattern => lowerName.includes(pattern));
+}
+
+function isToolsModel(modelName) {
+  if (!modelName || typeof modelName !== 'string') return false;
+  const lowerName = modelName.toLowerCase();
+  return TOOLS_MODEL_PATTERNS.some(pattern => lowerName.includes(pattern));
+}
+
+function isVisionAbilityModel(modelName) {
+  if (!modelName || typeof modelName !== 'string') return false;
+  const lowerName = modelName.toLowerCase();
+  return ABILITY_VISION_MODEL_PATTERNS.some(pattern => lowerName.includes(pattern));
+}
+
+// ============================================
 // Default Model Options
 // ============================================
 const defaultOptions = {
@@ -986,12 +1015,6 @@ function getModelDescriptor(model) {
     const sizeGB = (model.size / 1e9).toFixed(1);
     parts.push(`${sizeGB} GB`);
   }
-  if (model.modified_at) {
-    const modified = new Date(model.modified_at);
-    if (!Number.isNaN(modified.getTime())) {
-      parts.push(`Updated ${modified.toLocaleDateString()}`);
-    }
-  }
   return parts.join(' • ');
 }
 
@@ -1164,13 +1187,14 @@ function updateModelInfo(model) {
     elements.modelInfoSection.style.display = 'none';
     return;
   }
-  
-  const sizeGB = (model.size / 1e9).toFixed(1);
-  const modified = model.modified_at ? new Date(model.modified_at).toLocaleDateString() : 'Unknown';
-  
+
+  const abilities = [];
+  if (isThinkingModel(model.name)) abilities.push('Thinking');
+  if (isToolsModel(model.name)) abilities.push('Tools');
+  if (isVisionAbilityModel(model.name)) abilities.push('Vision');
+
   elements.modelInfoContent.innerHTML = `
-    <p><strong>Size:</strong> ${sizeGB} GB</p>
-    <p><strong>Modified:</strong> ${modified}</p>
+    <p><strong>Abilities:</strong> ${abilities.length ? abilities.join(', ') : 'None'}</p>
   `;
   elements.modelInfoSection.style.display = 'block';
 }

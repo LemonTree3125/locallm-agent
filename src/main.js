@@ -281,10 +281,17 @@ function createWindow() {
 
     const key = typeof input.key === 'string' ? input.key : '';
     const lowerKey = key.toLowerCase();
+    const isDevToolsChord = (lowerKey === 'i' && (input.control || input.meta) && input.shift) || key === 'F12';
     const isReloadChord = lowerKey === 'r' && (input.control || input.meta);
     const isF5 = key === 'F5';
 
-    if (!isReloadChord && !isF5) return;
+    if (!isDevToolsChord && !isReloadChord && !isF5) return;
+
+    if (isDevToolsChord) {
+      event.preventDefault();
+      mainWindow.webContents.toggleDevTools();
+      return;
+    }
 
     event.preventDefault();
     if (input.shift) {

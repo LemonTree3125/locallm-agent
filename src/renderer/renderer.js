@@ -110,10 +110,13 @@ const state = {
   // Multimodal attachments
   pendingAttachments: [], // Array of { base64, mimeType, name } for current message
   isVisionModel: false, // Whether current model supports vision/multimodal
+  // Model capabilities cache (from Ollama API)
+  modelCapabilitiesCache: new Map(), // modelName -> { capabilities, parameters, contextLength, family }
+  currentModelCapabilities: null, // Current model's capabilities object
 };
 
 // ============================================
-// Vision-capable models (multimodal)
+// Vision-capable models (multimodal) - fallback patterns when API doesn't report
 // ============================================
 const VISION_MODEL_PATTERNS = [
   'llava',
@@ -126,7 +129,115 @@ const VISION_MODEL_PATTERNS = [
 ];
 
 // ============================================
-// Model Abilities (for the Model Info section)
+// Model Capabilities Detection (from Ollama API)
+// ============================================
+
+/**
+ * Fetch and cache model capabilities from Ollama API
+ * Returns: { capabilities: string[], parameters: object, contextLength: number, family: string }
+ */
+async function fetchModelCapabilities(modelName) {
+  if (!modelName) return null;
+  
+  // Check cache first
+  if (state.modelCapabilitiesCache.has(modelName)) {
+    return state.modelCapabilitiesCache.get(modelName);
+  }
+  
+  try {
+    const result = await window.electronAPI.getModelInfo(modelName);
+    if (!result.success || !result.info) {
+      console.warn('Failed to fetch model info for', modelName, result.error);
+      return null;
+    }
+    
+    const info = result.info;
+    const capabilities = {
+      // Extract capabilities array from API (e.g., ["completion", "vision", "thinking"])
+      capabilities: info.capabilities || [],
+      // Extract model family (e.g., "gemma3", "qwen2", "llama")
+      family: info.details?.family || '',
+      families: info.details?.families || [],
+      // Extract parameter size (e.g., "12.2B")
+      parameterSize: info.details?.parameter_size || '',
+      // Extract context length from model_info
+      contextLength: extractContextLength(info.model_info),
+      // Parse model-specific default parameters from the parameters string
+      modelDefaults: parseModelParameters(info.parameters),
+      // Store raw model_info for additional metadata
+      modelInfo: info.model_info || {},
+    };
+    
+    // Determine specific capabilities
+    capabilities.hasVision = capabilities.capabilities.includes('vision') ||
+      VISION_MODEL_PATTERNS.some(p => modelName.toLowerCase().includes(p));
+    capabilities.hasThinking = capabilities.capabilities.includes('thinking') ||
+      isThinkingModelByName(modelName);
+    capabilities.hasTools = capabilities.capabilities.includes('tools') ||
+      isToolsModelByName(modelName);
+    
+    // Cache the result
+    state.modelCapabilitiesCache.set(modelName, capabilities);
+    
+    return capabilities;
+  } catch (error) {
+    console.error('Error fetching model capabilities:', error);
+    return null;
+  }
+}
+
+/**
+ * Extract context length from model_info object
+ * Ollama stores this as <family>.context_length (e.g., gemma3.context_length)
+ */
+function extractContextLength(modelInfo) {
+  if (!modelInfo) return null;
+  
+  // Look for context_length in various formats
+  for (const key of Object.keys(modelInfo)) {
+    if (key.endsWith('.context_length')) {
+      return modelInfo[key];
+    }
+  }
+  return null;
+}
+
+/**
+ * Parse model parameters from the Ollama parameters string
+ * Format: "key value\nkey value\n..."
+ */
+function parseModelParameters(parametersString) {
+  if (!parametersString || typeof parametersString !== 'string') return {};
+  
+  const params = {};
+  const lines = parametersString.split('\n');
+  
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    
+    // Format: "key                            value" (multiple spaces between key and value)
+    const match = trimmed.match(/^(\S+)\s+(.+)$/);
+    if (match) {
+      const key = match[1].toLowerCase();
+      let value = match[2].trim();
+      
+      // Remove quotes if present
+      if (value.startsWith('"') && value.endsWith('"')) {
+        value = value.slice(1, -1);
+      }
+      
+      // Try to parse as number
+      const numValue = parseFloat(value);
+      params[key] = isNaN(numValue) ? value : numValue;
+    }
+  }
+  
+  return params;
+}
+
+// ============================================
+// Model Abilities (fallback pattern-based detection)
 // ============================================
 // Per UI spec:
 // - Thinking: Deepseek, Qwen
@@ -136,22 +247,44 @@ const THINKING_MODEL_PATTERNS = ['deepseek', 'qwen'];
 const TOOLS_MODEL_PATTERNS = ['qwen'];
 const ABILITY_VISION_MODEL_PATTERNS = ['gemma'];
 
-function isThinkingModel(modelName) {
+// Pattern-based detection (fallback when API doesn't report capabilities)
+function isThinkingModelByName(modelName) {
   if (!modelName || typeof modelName !== 'string') return false;
   const lowerName = modelName.toLowerCase();
   return THINKING_MODEL_PATTERNS.some(pattern => lowerName.includes(pattern));
 }
 
-function isToolsModel(modelName) {
+function isToolsModelByName(modelName) {
   if (!modelName || typeof modelName !== 'string') return false;
   const lowerName = modelName.toLowerCase();
   return TOOLS_MODEL_PATTERNS.some(pattern => lowerName.includes(pattern));
 }
 
-function isVisionAbilityModel(modelName) {
+function isVisionAbilityModelByName(modelName) {
   if (!modelName || typeof modelName !== 'string') return false;
   const lowerName = modelName.toLowerCase();
   return ABILITY_VISION_MODEL_PATTERNS.some(pattern => lowerName.includes(pattern));
+}
+
+// API-aware capability detection (preferred)
+function isThinkingModel(modelName) {
+  // Check cached capabilities first
+  const caps = state.modelCapabilitiesCache.get(modelName);
+  if (caps) return caps.hasThinking;
+  // Fallback to pattern matching
+  return isThinkingModelByName(modelName);
+}
+
+function isToolsModel(modelName) {
+  const caps = state.modelCapabilitiesCache.get(modelName);
+  if (caps) return caps.hasTools;
+  return isToolsModelByName(modelName);
+}
+
+function isVisionAbilityModel(modelName) {
+  const caps = state.modelCapabilitiesCache.get(modelName);
+  if (caps) return caps.hasVision;
+  return isVisionAbilityModelByName(modelName);
 }
 
 // ============================================
@@ -457,8 +590,15 @@ async function loadChat(chatId) {
     state.currentModel = chat.model;
     elements.modelSelect.value = chat.model;
     setLastSelectedModelInStorage(chat.model);
+    
+    // Fetch capabilities if not cached, then update settings
+    fetchModelCapabilities(chat.model).then(caps => {
+      updateSettingsUIForModel(chat.model);
+    });
+    
     loadSettingsForModel(chat.model);
     if (elements.settingsModal && elements.settingsModal.style.display !== 'none') {
+      updateSettingsUIForModel(chat.model);
       loadSettingsToUI();
     }
     const model = state.models.find(m => m.name === chat.model);
@@ -649,25 +789,162 @@ window.promptRenameChat = function(chatId) {
   }
 };
 
-// Settings element mappings
+// Settings element mappings with metadata for dynamic behavior
 const settingsMap = {
-  temperature: { range: 'setting-temperature', value: 'setting-temperature-value' },
-  num_ctx: { range: 'setting-num-ctx', value: 'setting-num-ctx-value' },
-  num_predict: { range: 'setting-num-predict', value: 'setting-num-predict-value' },
-  top_p: { range: 'setting-top-p', value: 'setting-top-p-value' },
-  top_k: { range: 'setting-top-k', value: 'setting-top-k-value' },
-  repeat_penalty: { range: 'setting-repeat-penalty', value: 'setting-repeat-penalty-value' },
-  repeat_last_n: { range: 'setting-repeat-last-n', value: 'setting-repeat-last-n-value' },
-  seed: { value: 'setting-seed-value' },
-  mirostat: { select: 'setting-mirostat' },
-  mirostat_tau: { range: 'setting-mirostat-tau', value: 'setting-mirostat-tau-value' },
-  mirostat_eta: { range: 'setting-mirostat-eta', value: 'setting-mirostat-eta-value' },
-  tfs_z: { range: 'setting-tfs-z', value: 'setting-tfs-z-value' },
-  num_gpu: { range: 'setting-num-gpu', value: 'setting-num-gpu-value' },
-  num_thread: { range: 'setting-num-thread', value: 'setting-num-thread-value' },
-  keep_alive: { select: 'setting-keep-alive' },
-  think: { checkbox: 'setting-think' },
+  temperature: { range: 'setting-temperature', value: 'setting-temperature-value', settingItem: 'setting-item-temperature' },
+  num_ctx: { range: 'setting-num-ctx', value: 'setting-num-ctx-value', settingItem: 'setting-item-num-ctx' },
+  num_predict: { range: 'setting-num-predict', value: 'setting-num-predict-value', settingItem: 'setting-item-num-predict' },
+  top_p: { range: 'setting-top-p', value: 'setting-top-p-value', settingItem: 'setting-item-top-p' },
+  top_k: { range: 'setting-top-k', value: 'setting-top-k-value', settingItem: 'setting-item-top-k' },
+  repeat_penalty: { range: 'setting-repeat-penalty', value: 'setting-repeat-penalty-value', settingItem: 'setting-item-repeat-penalty' },
+  repeat_last_n: { range: 'setting-repeat-last-n', value: 'setting-repeat-last-n-value', settingItem: 'setting-item-repeat-last-n' },
+  seed: { value: 'setting-seed-value', settingItem: 'setting-item-seed' },
+  mirostat: { select: 'setting-mirostat', settingItem: 'setting-item-mirostat' },
+  mirostat_tau: { range: 'setting-mirostat-tau', value: 'setting-mirostat-tau-value', settingItem: 'setting-item-mirostat-tau' },
+  mirostat_eta: { range: 'setting-mirostat-eta', value: 'setting-mirostat-eta-value', settingItem: 'setting-item-mirostat-eta' },
+  tfs_z: { range: 'setting-tfs-z', value: 'setting-tfs-z-value', settingItem: 'setting-item-tfs-z' },
+  num_gpu: { range: 'setting-num-gpu', value: 'setting-num-gpu-value', settingItem: 'setting-item-num-gpu' },
+  num_thread: { range: 'setting-num-thread', value: 'setting-num-thread-value', settingItem: 'setting-item-num-thread' },
+  keep_alive: { select: 'setting-keep-alive', settingItem: 'setting-item-keep-alive' },
+  think: { checkbox: 'setting-think', settingItem: 'setting-item-think' },
 };
+
+/**
+ * Update settings UI based on model capabilities
+ * - Shows/hides Think Mode toggle based on thinking capability
+ * - Updates Context Window slider max based on model's context_length
+ * - Updates hints to show model-specific defaults
+ */
+function updateSettingsUIForModel(modelName) {
+  const caps = state.modelCapabilitiesCache.get(modelName);
+  state.currentModelCapabilities = caps;
+  
+  // Update Think Mode visibility
+  const thinkSettingItem = document.querySelector('.setting-item-toggle');
+  if (thinkSettingItem) {
+    const lowerName = (modelName || '').toLowerCase();
+    const isDeepSeek = lowerName.includes('deepseek');
+    const isGemma = lowerName.includes('gemma');
+    
+    // DeepSeek: always thinks (hide toggle), Gemma: never thinks (hide toggle)
+    // Other thinking models: show toggle for user control
+    const showThinkToggle = !isDeepSeek && !isGemma && (caps?.hasThinking || isThinkingModelByName(modelName));
+    thinkSettingItem.style.display = showThinkToggle ? 'flex' : 'none';
+
+    // Update Think Mode description based on model
+    const hintEl = thinkSettingItem.querySelector('.setting-hint-inline');
+    if (hintEl && showThinkToggle) {
+      const family = caps?.family || '';
+      if (family.includes('qwen') || modelName.toLowerCase().includes('qwen')) {
+        hintEl.textContent = 'Qwen reasoning mode';
+      } else {
+        hintEl.textContent = 'For reasoning models';
+      }
+    }
+  }
+  
+  // Update Context Window slider max and hint based on model's context_length
+  const ctxRange = document.getElementById('setting-num-ctx');
+  const ctxValue = document.getElementById('setting-num-ctx-value');
+  const ctxLabel = document.querySelector('label[for="setting-num-ctx"]');
+  const ctxHint = ctxLabel?.closest('.setting-item')?.querySelector('.setting-hint');
+  
+  if (caps?.contextLength && ctxRange && ctxValue) {
+    const maxCtx = caps.contextLength;
+    ctxRange.max = maxCtx;
+    ctxValue.max = maxCtx;
+    
+    // Update label to show model's max
+    if (ctxLabel) {
+      const rangeSpan = ctxLabel.querySelector('.setting-range');
+      if (rangeSpan) {
+        rangeSpan.textContent = `(512 - ${formatNumber(maxCtx)})`;
+      }
+    }
+    
+    // Update hint with model info
+    if (ctxHint) {
+      ctxHint.textContent = `Model max: ${formatNumber(maxCtx)} | Higher = more memory, slower`;
+    }
+  } else {
+    // Reset to defaults if no model-specific info
+    if (ctxRange) ctxRange.max = 131072;
+    if (ctxValue) ctxValue.max = 131072;
+    if (ctxLabel) {
+      const rangeSpan = ctxLabel.querySelector('.setting-range');
+      if (rangeSpan) rangeSpan.textContent = '(512 - 131072)';
+    }
+    if (ctxHint) {
+      ctxHint.textContent = 'Default: 2048 | Higher = more memory, slower generation';
+    }
+  }
+  
+  // Update Temperature, Top-K, Top-P hints if model has specific defaults
+  if (caps?.modelDefaults) {
+    const defaults = caps.modelDefaults;
+    
+    // Temperature
+    if (defaults.temperature !== undefined) {
+      const tempHint = document.querySelector('label[for="setting-temperature"]')?.closest('.setting-item')?.querySelector('.setting-hint');
+      if (tempHint) {
+        tempHint.textContent = `Model default: ${defaults.temperature} | Lower = deterministic, Higher = creative`;
+      }
+    }
+    
+    // Top-K
+    if (defaults.top_k !== undefined) {
+      const topkHint = document.querySelector('label[for="setting-top-k"]')?.closest('.setting-item')?.querySelector('.setting-hint');
+      if (topkHint) {
+        topkHint.textContent = `Model default: ${defaults.top_k} | Lower = more focused, Higher = more diverse`;
+      }
+    }
+    
+    // Top-P
+    if (defaults.top_p !== undefined) {
+      const toppHint = document.querySelector('label[for="setting-top-p"]')?.closest('.setting-item')?.querySelector('.setting-hint');
+      if (toppHint) {
+        toppHint.textContent = `Model default: ${defaults.top_p} | Lower = more focused responses`;
+      }
+    }
+  }
+}
+
+/**
+ * Format large numbers with K/M suffix for readability
+ */
+function formatNumber(num) {
+  if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+  if (num >= 1000) return (num / 1000).toFixed(0) + 'K';
+  return num.toString();
+}
+
+/**
+ * Apply model-specific default values to settings when switching models
+ * Only updates values that haven't been customized by the user
+ */
+function applyModelDefaultsToSettings(modelName) {
+  const caps = state.modelCapabilitiesCache.get(modelName);
+  if (!caps?.modelDefaults) return;
+  
+  const defaults = caps.modelDefaults;
+  
+  // Only apply model defaults if user hasn't saved custom settings for this model
+  const store = readSettingsStore();
+  const hasCustomSettings = store && store[modelName];
+  
+  if (!hasCustomSettings) {
+    // Apply model-specific defaults
+    if (defaults.temperature !== undefined) {
+      modelOptions.temperature = defaults.temperature;
+    }
+    if (defaults.top_k !== undefined) {
+      modelOptions.top_k = defaults.top_k;
+    }
+    if (defaults.top_p !== undefined) {
+      modelOptions.top_p = defaults.top_p;
+    }
+  }
+}
 
 // ============================================
 // Multimodal / Vision Support Functions
@@ -675,9 +952,18 @@ const settingsMap = {
 
 /**
  * Check if a model name indicates vision/multimodal capability
+ * First checks cached API capabilities, then falls back to pattern matching
  */
 function isVisionCapableModel(modelName) {
   if (!modelName) return false;
+  
+  // Check cached capabilities first (from Ollama API)
+  const caps = state.modelCapabilitiesCache.get(modelName);
+  if (caps?.hasVision !== undefined) {
+    return caps.hasVision;
+  }
+  
+  // Fallback to pattern matching
   const lowerName = modelName.toLowerCase();
   return VISION_MODEL_PATTERNS.some(pattern => lowerName.includes(pattern));
 }
@@ -945,6 +1231,8 @@ function setupEventListeners() {
   elements.settingsBtn.addEventListener('click', () => {
     // Ensure we show the saved settings for the active model.
     loadSettingsForModel(state.currentModel);
+    // Update UI based on model capabilities (show/hide think mode, update limits)
+    updateSettingsUIForModel(state.currentModel);
     loadSettingsToUI();
     showModal(elements.settingsModal);
   });
@@ -1011,10 +1299,25 @@ function setupEventListeners() {
 function getModelDescriptor(model) {
   if (!model) return '';
   const parts = [];
+  
+  // Add file size
   if (typeof model.size === 'number') {
     const sizeGB = (model.size / 1e9).toFixed(1);
     parts.push(`${sizeGB} GB`);
   }
+  
+  // Add capabilities badges from cached API data
+  const caps = state.modelCapabilitiesCache.get(model.name);
+  if (caps) {
+    const badges = [];
+    if (caps.hasVision) badges.push('Vision');
+    if (caps.hasThinking) badges.push('Thinking');
+    if (caps.hasTools) badges.push('Tools');
+    if (badges.length > 0) {
+      parts.push(badges.join(' '));
+    }
+  }
+  
   return parts.join(' • ');
 }
 
@@ -1146,7 +1449,18 @@ function populateModelSelect(models) {
     state.currentModel = preferred;
     elements.modelSelect.value = preferred;
     setLastSelectedModelInStorage(preferred);
-    loadSettingsForModel(preferred);
+    
+    // Fetch model capabilities async (don't block UI)
+    fetchModelCapabilities(preferred).then(caps => {
+      if (caps) {
+        applyModelDefaultsToSettings(preferred);
+        updateSettingsUIForModel(preferred);
+      }
+      loadSettingsForModel(preferred);
+      // Update model info with API data
+      const model = models.find(m => m.name === preferred) || models[0];
+      updateModelInfo(model);
+    });
 
     const model = models.find(m => m.name === preferred) || models[0];
     updateModelInfo(model);
@@ -1154,6 +1468,24 @@ function populateModelSelect(models) {
     
     // Update vision UI for selected model
     updateVisionUI();
+    
+    // Prefetch capabilities for all models in the background
+    prefetchAllModelCapabilities(models);
+  }
+}
+
+/**
+ * Prefetch capabilities for all available models in the background
+ * This improves UX by having data ready when user switches models
+ */
+async function prefetchAllModelCapabilities(models) {
+  for (const model of models) {
+    // Skip if already cached
+    if (!state.modelCapabilitiesCache.has(model.name)) {
+      // Small delay between requests to not overwhelm the API
+      await new Promise(resolve => setTimeout(resolve, 100));
+      await fetchModelCapabilities(model.name);
+    }
   }
 }
 
@@ -1161,7 +1493,20 @@ async function handleModelChange() {
   const modelName = elements.modelSelect.value;
   state.currentModel = modelName;
   setLastSelectedModelInStorage(modelName);
+  
+  // Fetch model capabilities from Ollama API (async, cached)
+  const caps = await fetchModelCapabilities(modelName);
+  
+  // Apply model defaults if no custom settings exist
+  if (caps) {
+    applyModelDefaultsToSettings(modelName);
+  }
+  
   loadSettingsForModel(modelName);
+  
+  // Update settings UI based on model capabilities
+  updateSettingsUIForModel(modelName);
+  
   if (elements.settingsModal && elements.settingsModal.style.display !== 'none') {
     loadSettingsToUI();
   }
@@ -1188,14 +1533,27 @@ function updateModelInfo(model) {
     return;
   }
 
+  // Use cached capabilities from API when available
+  const caps = state.modelCapabilitiesCache.get(model.name);
   const abilities = [];
-  if (isThinkingModel(model.name)) abilities.push('Thinking');
-  if (isToolsModel(model.name)) abilities.push('Tools');
-  if (isVisionAbilityModel(model.name)) abilities.push('Vision');
+  
+  if (caps?.hasThinking || isThinkingModelByName(model.name)) abilities.push('Thinking');
+  if (caps?.hasTools || isToolsModelByName(model.name)) abilities.push('Tools');
+  if (caps?.hasVision || isVisionAbilityModelByName(model.name)) abilities.push('Vision');
+  
+  // Build detailed model info
+  let infoHtml = `<p><strong>Abilities:</strong> ${abilities.length ? abilities.join(', ') : 'None'}</p>`;
+  
+  if (caps) {
+    if (caps.parameterSize) {
+      infoHtml += `<p><strong>Size:</strong> ${caps.parameterSize}</p>`;
+    }
+    if (caps.contextLength) {
+      infoHtml += `<p><strong>Max Context:</strong> ${formatNumber(caps.contextLength)} tokens</p>`;
+    }
+  }
 
-  elements.modelInfoContent.innerHTML = `
-    <p><strong>Abilities:</strong> ${abilities.length ? abilities.join(', ') : 'None'}</p>
-  `;
+  elements.modelInfoContent.innerHTML = infoHtml;
   elements.modelInfoSection.style.display = 'block';
 }
 
@@ -1273,12 +1631,27 @@ async function checkModelStatus() {
   }
 }
 
+function isModelGeneratingAnywhere(modelName) {
+  if (!modelName) return false;
+  for (const gen of state.activeGenerations.values()) {
+    if (gen?.model === modelName) return true;
+  }
+  return false;
+}
+
 function updateModelStatusUI(status, text) {
   elements.modelStatus.className = `status status-${status}`;
   elements.modelStatus.querySelector('.status-text').textContent = text;
   // Show unload button only when model is loaded
   if (elements.unloadModelBtn) {
     elements.unloadModelBtn.style.display = status === 'loaded' ? 'flex' : 'none';
+    const busy = isModelGeneratingAnywhere(state.currentModel);
+    elements.unloadModelBtn.disabled = status !== 'loaded' || busy;
+    if (busy) {
+      elements.unloadModelBtn.title = 'Cannot unload while the model is generating in another chat';
+    } else {
+      elements.unloadModelBtn.title = 'Unload model from VRAM';
+    }
   }
 }
 
@@ -1295,6 +1668,10 @@ function setModelStatusGenerating(isGenerating) {
 // Unload model from VRAM
 async function unloadModel() {
   if (!state.currentModel || state.isGenerating) return;
+  if (isModelGeneratingAnywhere(state.currentModel)) {
+    showNotification('Cannot unload: model is generating in another chat');
+    return;
+  }
   
   updateModelStatusUI('loading', 'Unloading...');
   
@@ -1525,6 +1902,13 @@ async function sendMessage() {
 }
 
 async function stopGeneration() {
+  // Give immediate UI feedback; the main process will send an aborted `done` chunk.
+  if (elements.generationStats) {
+    elements.generationStats.textContent = 'Stopping...';
+  }
+  if (elements.stopBtn) {
+    elements.stopBtn.disabled = true;
+  }
   try {
     await window.electronAPI.abort();
   } catch (error) {
@@ -1566,11 +1950,11 @@ function appendMessage(role, content, showTyping = false, meta = {}) {
   roleSpan.className = 'message-role';
 
   if (role === 'user') {
-    roleSpan.textContent = '👤 You';
+    roleSpan.textContent = 'User';
   } else if (role === 'assistant') {
     const chatModel = state.savedChats.find(c => c.id === state.currentChatId)?.model;
     const modelName = meta?.model || chatModel || state.currentModel || 'Assistant';
-    roleSpan.textContent = `🤖 ${modelName}`;
+    roleSpan.textContent = `${modelName}`;
   } else {
     roleSpan.textContent = role;
   }
@@ -1662,7 +2046,7 @@ function updateMessageContent(messageDiv, content, isComplete = false) {
   
   // During streaming - use smart incremental rendering
   // Render markdown when significant content is added
-  const shouldRenderNow = content.length - lastRenderLength >= 5;
+  const shouldRenderNow = content.length - lastRenderLength >= 2;
   
   if (shouldRenderNow) {
     clearTimeout(renderDebounceTimer);
@@ -1877,7 +2261,24 @@ function applySettings() {
 }
 
 function resetSettings() {
+  // Start with global defaults
   modelOptions = { ...defaultOptions };
+  
+  // Apply model-specific defaults if available from API
+  const caps = state.modelCapabilitiesCache.get(state.currentModel);
+  if (caps?.modelDefaults) {
+    const defaults = caps.modelDefaults;
+    if (defaults.temperature !== undefined) {
+      modelOptions.temperature = defaults.temperature;
+    }
+    if (defaults.top_k !== undefined) {
+      modelOptions.top_k = defaults.top_k;
+    }
+    if (defaults.top_p !== undefined) {
+      modelOptions.top_p = defaults.top_p;
+    }
+  }
+  
   saveSettingsForModel(state.currentModel);
   loadSettingsToUI();
   showNotification('Settings restored to defaults');
@@ -1911,6 +2312,37 @@ function showNotification(message) {
   }, 2000);
 }
 
+function shouldDisableToolsForModel(modelName) {
+  if (!modelName || typeof modelName !== 'string') return false;
+  const lowerName = modelName.toLowerCase();
+  return lowerName.includes('deepseek') || lowerName.includes('gemma');
+}
+
+/**
+ * Check if model should ALWAYS have thinking enabled (no user toggle)
+ * DeepSeek models are reasoning models that should always think.
+ */
+function shouldAlwaysThink(modelName) {
+  if (!modelName || typeof modelName !== 'string') return false;
+  const lowerName = modelName.toLowerCase();
+  // DeepSeek models (especially R1) are reasoning models that should always think
+  return lowerName.includes('deepseek');
+}
+
+/**
+ * Check if think mode toggle should be shown for a model.
+ * Returns false for models where think is forced (always on or always off).
+ */
+function shouldAllowThinkForModel(modelName) {
+  if (!modelName || typeof modelName !== 'string') return true;
+  const lowerName = modelName.toLowerCase();
+  // DeepSeek: always thinks (toggle hidden, forced true)
+  if (lowerName.includes('deepseek')) return false;
+  // Gemma: never thinks (toggle hidden, forced false)
+  if (lowerName.includes('gemma')) return false;
+  return true;
+}
+
 function getActiveOptions() {
   // Return only non-default options to avoid sending unnecessary params
   const options = {};
@@ -1930,7 +2362,18 @@ function getActiveOptions() {
   }
   // Always include think parameter - some models (Qwen3) think by default
   // so we need to explicitly pass false to disable it
-  options.think = modelOptions.think === true;
+  // DeepSeek models should ALWAYS think (forced true)
+  if (shouldAlwaysThink(state.currentModel)) {
+    options.think = true;
+  } else if (shouldAllowThinkForModel(state.currentModel)) {
+    options.think = modelOptions.think === true;
+  } else {
+    options.think = false;
+  }
+
+  // Disable tool access for models where we don't want tool calling.
+  // (Main process also enforces this, but we avoid sending tool schemas at all.)
+  options.useTools = !shouldDisableToolsForModel(state.currentModel);
   return options;
 }
 

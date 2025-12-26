@@ -215,6 +215,13 @@ const webSearchTool = {
 // Available tools array
 const availableTools = [webSearchTool];
 
+function shouldDisableToolsForModel(modelName) {
+  if (!modelName || typeof modelName !== 'string') return false;
+  const lowerName = modelName.toLowerCase();
+  // Requested: disable tool access for DeepSeek and Gemma models.
+  return lowerName.includes('deepseek') || lowerName.includes('gemma');
+}
+
 // Map tool names to their implementations
 const toolImplementations = {
   searchWeb: searchWeb
@@ -498,13 +505,38 @@ ipcMain.handle('ollama:ps', async () => {
 // Unload model from VRAM
 ipcMain.handle('ollama:unload', async (event, modelName) => {
   try {
-    // Setting keep_alive to 0 immediately unloads the model
+    // Setting keep_alive to 0 immediately unloads the model.
+    // Use a non-empty prompt and a string keep_alive to avoid any falsy stripping in client layers.
     await ollama.generate({
       model: modelName,
-      prompt: '',
-      keep_alive: 0,
+      prompt: ' ',
+      keep_alive: '0',
     });
-    return { success: true };
+
+    // Verify unload (it can take a moment to reflect in `ps`).
+    const matchesModel = (m) =>
+      m?.name === modelName ||
+      m?.model === modelName ||
+      (typeof modelName === 'string' && m?.name?.startsWith(modelName.split(':')[0]));
+
+    const maxWaitMs = 2000;
+    const intervalMs = 200;
+    const start = Date.now();
+
+    while (Date.now() - start < maxWaitMs) {
+      try {
+        const ps = await ollama.ps();
+        const stillRunning = Array.isArray(ps?.models) && ps.models.some(matchesModel);
+        if (!stillRunning) {
+          return { success: true };
+        }
+      } catch {
+        // If ps fails transiently, keep waiting a bit.
+      }
+      await new Promise(resolve => setTimeout(resolve, intervalMs));
+    }
+
+    return { success: false, error: 'Unload requested, but model still appears loaded. Try again after generation completes.' };
   } catch (error) {
     return { success: false, error: error.message };
   }
@@ -519,6 +551,7 @@ ipcMain.handle('ollama:chat-stream', async (event, { model, messages, options })
   try {
     // Extract keep_alive, think, and useTools from options
     const { keep_alive, think, useTools = true, ...modelOptions } = options || {};
+    const effectiveUseTools = useTools && !shouldDisableToolsForModel(model);
     
     // Work with a copy of messages to track conversation history for tool loop
     let conversationHistory = [...messages];
@@ -529,6 +562,8 @@ ipcMain.handle('ollama:chat-stream', async (event, { model, messages, options })
         messages: msgs,
         stream,
         options: modelOptions,
+        // Allow renderer to cancel in-flight HTTP requests immediately.
+        signal: currentAbortController?.signal,
       };
       
       // Add keep_alive if specified
@@ -542,7 +577,7 @@ ipcMain.handle('ollama:chat-stream', async (event, { model, messages, options })
       }
       
       // Add tools if enabled
-      if (useTools) {
+      if (effectiveUseTools) {
         params.tools = availableTools;
       }
       
@@ -580,6 +615,10 @@ ipcMain.handle('ollama:chat-stream', async (event, { model, messages, options })
         
         // Execute each tool call and add results to history
         for (const toolCall of checkResponse.message.tool_calls) {
+          if (currentAbortController?.signal.aborted) {
+            sendStreamChunk({ content: '', done: true, aborted: true });
+            break;
+          }
           const toolResult = await executeToolCall(toolCall);
           
           // Notify renderer of tool result
@@ -665,6 +704,7 @@ function sendStreamChunk(data) {
 ipcMain.handle('ollama:chat', async (event, { model, messages, options }) => {
   try {
     const { useTools = true, ...modelOptions } = options || {};
+    const effectiveUseTools = useTools && !shouldDisableToolsForModel(model);
     let conversationHistory = [...messages];
     
     const MAX_TOOL_ITERATIONS = 5;
@@ -681,7 +721,7 @@ ipcMain.handle('ollama:chat', async (event, { model, messages, options }) => {
         options: modelOptions,
       };
       
-      if (useTools) {
+      if (effectiveUseTools) {
         requestParams.tools = availableTools;
       }
       

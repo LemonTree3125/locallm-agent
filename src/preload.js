@@ -94,4 +94,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
    * @returns {Promise<{success: boolean, error?: string}>}
    */
   abort: () => ipcRenderer.invoke('ollama:abort'),
+
+  // ============================================
+  // Chat Storage (File-based)
+  // ============================================
+
+  listChats: () => ipcRenderer.invoke('chats:list'),
+  loadChat: (chatId) => ipcRenderer.invoke('chats:load', chatId),
+  createChat: (model = null) => ipcRenderer.invoke('chats:create', { model }),
+  updateChat: (chat) => ipcRenderer.invoke('chats:update', chat),
+  renameChat: (chatId, title) => ipcRenderer.invoke('chats:rename', { chatId, title }),
+  deleteChat: (chatId) => ipcRenderer.invoke('chats:delete', chatId),
+  clearChats: () => ipcRenderer.invoke('chats:clear'),
+  importChats: (legacyChats) => ipcRenderer.invoke('chats:import', legacyChats),
 });

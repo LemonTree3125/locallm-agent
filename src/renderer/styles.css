@@ -275,6 +275,167 @@ select:disabled {
   cursor: not-allowed;
 }
 
+.model-select-hidden {
+  display: none;
+}
+
+/* ============================================
+   Custom Model Selector
+   ============================================ */
+.model-select-section {
+  position: relative;
+}
+
+.model-selector-btn {
+  width: 100%;
+  padding: 10px 12px;
+  background-color: var(--input-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--transition-speed);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.model-selector-btn:hover:not(:disabled) {
+  border-color: var(--accent-primary);
+}
+
+.model-selector-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.model-selector-text {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.model-selector-title {
+  font-size: 0.9rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.model-selector-desc {
+  margin-top: 2px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.model-selector-caret {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+/* Model dropdown (anchored) */
+.model-select-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  padding: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.model-select-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.model-select-item {
+  width: 100%;
+  text-align: left;
+  background-color: transparent;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 10px 10px;
+  cursor: pointer;
+  transition: all var(--transition-speed);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.model-select-item:hover {
+  background-color: var(--bg-tertiary);
+  border-color: var(--border-color);
+}
+
+.model-select-item.active {
+  border-color: transparent;
+}
+
+.model-select-item:focus {
+  outline: none;
+}
+
+.model-select-item:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.model-select-item-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.model-select-item-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.model-select-item-desc {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.model-select-item-check {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--accent-primary);
+  opacity: 0;
+  transform: scale(0.95);
+  transition: opacity var(--transition-speed), transform var(--transition-speed);
+}
+
+.model-select-item.active .model-select-item-check {
+  opacity: 1;
+  transform: scale(1);
+}
+
 /* ============================================
    Buttons
    ============================================ */
@@ -300,6 +461,7 @@ select:disabled {
 .btn-primary {
   background-color: var(--accent-primary);
   color: #000;
+  height: 48px;
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -895,22 +1057,34 @@ select:disabled {
   border-top: 1px solid var(--border-color);
 }
 
-.input-wrapper {
+.input-row {
   max-width: 900px;
   margin: 0 auto;
   display: flex;
-  gap: 12px;
+  gap: 8px;
   align-items: flex-end;
+}
+
+.input-wrapper {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  background-color: var(--input-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  padding: 6px 10px;
 }
 
 textarea {
   flex: 1;
-  padding: 12px 16px;
-  background-color: var(--input-bg);
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius);
+  padding: 6px 8px;
+  background-color: transparent;
+  border: none;
   color: var(--text-primary);
   font-size: 1rem;
+  line-height: 1.35;
   font-family: inherit;
   resize: none;
   max-height: 200px;
@@ -919,6 +1093,9 @@ textarea {
 
 textarea:focus {
   outline: none;
+}
+
+.input-wrapper:focus-within {
   border-color: var(--accent-primary);
 }
 
@@ -936,11 +1113,30 @@ textarea::placeholder {
   gap: 8px;
 }
 
+/* Match button height to textarea for clean alignment */
+.input-actions .btn {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.input-actions .btn.btn-icon {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+/* Keep the send button height aligned after moving it outside the input wrapper */
+.input-row > #send-btn.btn {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
 .input-footer {
   max-width: 900px;
   margin: 8px auto 0;
   font-size: 0.75rem;
   color: var(--text-muted);
+  display: flex;
+  align-items: center;
 }
 
 .separator {
@@ -1295,6 +1491,174 @@ textarea::placeholder {
   margin-top: 24px;
   padding-top: 16px;
   border-top: 1px solid var(--border-color);
+}
+
+/* ============================================
+   Multimodal / Attachments
+   ============================================ */
+
+/* Attachment preview area above input */
+.attachment-preview {
+  display: flex;
+  padding: 12px 16px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-bottom: none;
+  border-radius: var(--border-radius) var(--border-radius) 0 0;
+  gap: 8px;
+  flex-wrap: wrap;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.attachment-list {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.attachment-item {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  border-radius: 8px;
+  overflow: hidden;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+}
+
+.attachment-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.attachment-item .attachment-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background-color: rgba(0, 0, 0, 0.7);
+  color: white;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.attachment-item:hover .attachment-remove {
+  opacity: 1;
+}
+
+.attachment-item .attachment-name {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 2px 4px;
+  background-color: rgba(0, 0, 0, 0.7);
+  color: white;
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Input left actions (attach button) */
+.input-left-actions {
+  display: flex;
+  align-items: center;
+  padding-bottom: 2px;
+}
+
+.input-left-actions .btn-icon {
+  padding: 6px;
+  font-size: 1.1rem;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.input-left-actions .btn-icon:hover:not(:disabled) {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.input-left-actions .btn-icon:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Vision indicator in footer */
+.vision-indicator {
+  color: var(--accent-success);
+  font-size: 0.8rem;
+  margin-left: auto;
+}
+
+/* Drag and drop overlay */
+.chat-container.drag-over,
+.input-container.drag-over {
+  position: relative;
+}
+
+.chat-container.drag-over::after,
+.input-container.drag-over::after {
+  content: '📷 Drop image here';
+  position: absolute;
+  inset: 0;
+  background-color: rgba(106, 164, 255, 0.1);
+  border: 2px dashed var(--accent-primary);
+  border-radius: var(--border-radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  color: var(--accent-primary);
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* Message attachments (images in chat) */
+.message-attachments {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+  padding: 8px 0;
+}
+
+.message-image-wrapper {
+  max-width: 300px;
+  max-height: 300px;
+  border-radius: 8px;
+  overflow: hidden;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+}
+
+.message-image {
+  width: 100%;
+  height: auto;
+  max-height: 300px;
+  object-fit: contain;
+  display: block;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.message-image:hover {
+  transform: scale(1.02);
 }
 
 /* ============================================

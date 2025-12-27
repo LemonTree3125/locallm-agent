@@ -2824,7 +2824,8 @@ function showNotification(message) {
 function shouldDisableToolsForModel(modelName) {
   if (!modelName || typeof modelName !== 'string') return false;
   const lowerName = modelName.toLowerCase();
-  return lowerName.includes('deepseek') || lowerName.includes('gemma');
+  // Disable tool access for models that don't support tools
+  return lowerName.includes('deepseek') || lowerName.includes('gemma') || lowerName.includes('dolphin') || lowerName.includes('llama');
 }
 
 /**
@@ -2869,6 +2870,11 @@ function getActiveOptions() {
       }
     }
   }
+  
+  // Always send num_ctx to override model's built-in default context size
+  // Some models (e.g., dolphin-mistral-nemo) have extremely large defaults (128K+)
+  // that can cause GPU memory overflow and spillover to shared memory
+  options.num_ctx = modelOptions.num_ctx;
   // Always include think parameter - some models (Qwen3) think by default
   // so we need to explicitly pass false to disable it
   // DeepSeek models should ALWAYS think (forced true)

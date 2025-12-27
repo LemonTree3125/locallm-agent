@@ -222,8 +222,8 @@ const availableTools = [webSearchTool];
 function shouldDisableToolsForModel(modelName) {
   if (!modelName || typeof modelName !== 'string') return false;
   const lowerName = modelName.toLowerCase();
-  // Requested: disable tool access for DeepSeek and Gemma models.
-  return lowerName.includes('deepseek') || lowerName.includes('gemma');
+  // Disable tool access for models that don't support tools
+  return lowerName.includes('deepseek') || lowerName.includes('gemma') || lowerName.includes('dolphin') || lowerName.includes('llama');
 }
 
 // Map tool names to their implementations

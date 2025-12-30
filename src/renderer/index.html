@@ -43,8 +43,7 @@
       </div>
 
       <div class="sidebar-section new-chat-section">
-        <button id="new-chat-btn" class="btn btn-primary new-chat-btn-normal">New Chat</button>
-        <button id="new-council-chat-btn" class="btn btn-secondary new-chat-btn-council">New Council</button>
+        <button id="new-chat-btn" class="btn btn-primary">New Chat</button>
       </div>
 
       <div class="sidebar-section chat-list-section">
@@ -388,99 +387,46 @@
           <h3>Installing Models</h3>
           <p>To use LocalLM Agent, you need to have models installed via Ollama.</p>
           
-          <h4>Popular Models</h4>
-          <table class="model-table">
+          <h4>📋 Model Name Reference</h4>
+          <p class="help-note">Display names shown in the app vs actual Ollama model names:</p>
+          <table class="model-table model-reference-table">
             <thead>
               <tr>
-                <th>Model</th>
-                <th>Size</th>
-                <th>Command</th>
+                <th>Display Name</th>
+                <th>Actual Model</th>
+                <th>Install Command</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td><strong>Llama 3.2</strong> (Recommended)</td>
-                <td>2GB</td>
-                <td><code>ollama pull llama3.2</code></td>
+                <td>Felix 2</td>
+                <td><code>qwen3:14b</code></td>
+                <td><code>ollama pull qwen3:14b</code></td>
               </tr>
               <tr>
-                <td><strong>Llama 3.2 (1B)</strong></td>
-                <td>1.3GB</td>
-                <td><code>ollama pull llama3.2:1b</code></td>
+                <td>Felix 2 mini</td>
+                <td><code>qwen3:8b</code></td>
+                <td><code>ollama pull qwen3:8b</code></td>
               </tr>
               <tr>
-                <td><strong>Mistral</strong></td>
-                <td>4.1GB</td>
-                <td><code>ollama pull mistral</code></td>
+                <td>Felix 2.5</td>
+                <td><code>deepseek-r1:14b</code></td>
+                <td><code>ollama pull deepseek-r1:14b</code></td>
               </tr>
               <tr>
-                <td><strong>Phi-3</strong></td>
-                <td>2.2GB</td>
-                <td><code>ollama pull phi3</code></td>
-              </tr>
-              <tr>
-                <td><strong>Gemma 2</strong></td>
-                <td>5.4GB</td>
-                <td><code>ollama pull gemma2</code></td>
-              </tr>
-              <tr>
-                <td><strong>Qwen 2.5</strong></td>
-                <td>4.7GB</td>
-                <td><code>ollama pull qwen2.5</code></td>
-              </tr>
-              <tr>
-                <td><strong>DeepSeek Coder</strong></td>
-                <td>776MB</td>
-                <td><code>ollama pull deepseek-coder:1.3b</code></td>
-              </tr>
-              <tr>
-                <td><strong>CodeLlama</strong></td>
-                <td>3.8GB</td>
-                <td><code>ollama pull codellama</code></td>
-              </tr>
-            </tbody>
-          </table>
-
-          <h4>🖼️ Vision Models (Image Support)</h4>
-          <p>These models can analyze images. Attach images using the 📎 button or drag & drop.</p>
-          <table class="model-table">
-            <thead>
-              <tr>
-                <th>Model</th>
-                <th>Size</th>
-                <th>Command</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><strong>Gemma 3 12B</strong> (Recommended)</td>
-                <td>8.1GB</td>
+                <td>m1</td>
+                <td><code>gemma3:12b</code></td>
                 <td><code>ollama pull gemma3:12b</code></td>
               </tr>
               <tr>
-                <td><strong>Gemma 3 4B</strong></td>
-                <td>3.3GB</td>
-                <td><code>ollama pull gemma3:4b</code></td>
+                <td>Alyx 1e</td>
+                <td><code>mannix/llama3.1-8b-abliterated:latest</code></td>
+                <td><code>ollama pull mannix/llama3.1-8b-abliterated:latest</code></td>
               </tr>
               <tr>
-                <td><strong>LLaVA 7B</strong></td>
-                <td>4.7GB</td>
-                <td><code>ollama pull llava</code></td>
-              </tr>
-              <tr>
-                <td><strong>LLaVA 13B</strong></td>
-                <td>8GB</td>
-                <td><code>ollama pull llava:13b</code></td>
-              </tr>
-              <tr>
-                <td><strong>Moondream 2</strong></td>
-                <td>1.7GB</td>
-                <td><code>ollama pull moondream</code></td>
-              </tr>
-              <tr>
-                <td><strong>Llama 3.2 Vision 11B</strong></td>
-                <td>7.9GB</td>
-                <td><code>ollama pull llama3.2-vision</code></td>
+                <td>Alyx 2</td>
+                <td><code>cognitivecomputations/dolphin-mistral-nemo:latest</code></td>
+                <td><code>ollama pull cognitivecomputations/dolphin-mistral-nemo:latest</code></td>
               </tr>
             </tbody>
           </table>

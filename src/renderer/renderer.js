@@ -9,7 +9,6 @@ const elements = {
   modelSelectorDesc: document.getElementById('model-selector-desc'),
   modelSelectDropdown: document.getElementById('model-select-dropdown'),
   newChatBtn: document.getElementById('new-chat-btn'),
-  newCouncilChatBtn: document.getElementById('new-council-chat-btn'),
   ollamaStatus: document.getElementById('ollama-status'),
   modelInfoSection: document.getElementById('model-info-section'),
   modelInfoContent: document.getElementById('model-info-content'),
@@ -103,7 +102,6 @@ const state = {
   conversationHistory: [],
   isGenerating: false,
   currentChatId: null,
-  currentChatType: 'normal', // 'normal' or 'council'
   savedChats: [],
   modelLoaded: false,
   modelStatusInterval: null,
@@ -116,13 +114,15 @@ const state = {
   modelCapabilitiesCache: new Map(), // modelName -> { capabilities, parameters, contextLength, family }
   currentModelCapabilities: null, // Current model's capabilities object
   // AI Council state
-  councilMode: false, // Whether council mode is active
   councilRunning: false, // Whether a council session is in progress
   councilStartTime: null, // Timestamp when council session started
   councilDurationInterval: null, // Interval for updating duration display
   councilProgressDiv: null, // Reference to the progress message element in chat
   councilPlan: [], // Current plan tasks
 };
+
+// AI Council pseudo model identifier
+const AI_COUNCIL_MODEL = '__ai_council__';
 
 // ============================================
 // Vision-capable models (multimodal) - fallback patterns when API doesn't report
@@ -136,6 +136,85 @@ const VISION_MODEL_PATTERNS = [
   'llama3.2-vision',
   'granite3.2-vision',
 ];
+
+// ============================================
+// Model Display Name Mapping
+// Maps actual model names to user-friendly display names
+// Backend uses actual names; Frontend shows display names
+// ============================================
+const MODEL_DISPLAY_NAMES = {
+  '__ai_council__': 'AI Council',
+  'qwen3:14b': 'Felix 2',
+  'qwen3:8b': 'Felix 2 mini',
+  'deepseek-r1:14b' : 'Felix 2.5 (Preview)',
+  'gemma3:12b': 'm1',
+  'mannix/llama3.1-8b-abliterated:latest': 'Alyx 1e',
+  'cognitivecomputations/dolphin-mistral-nemo:latest': 'Alyx 2',
+};
+
+// ============================================
+// Model Custom Descriptors
+// Custom subtitle/description for each model shown in the selector
+// ============================================
+const MODEL_DESCRIPTORS = {
+  '__ai_council__': 'Multi-agent collaborative reasoning',
+  'qwen3:14b': 'Advanced reasoning tasks',
+  'qwen3:8b': 'Balanced for simple tasks',
+  'deepseek-r1:14b': 'Long multi-step thinking',
+  'gemma3:12b': 'Multimodal capabilities',
+  'mannix/llama3.1-8b-abliterated:latest': 'Unrestricted efficient assistant',
+  'cognitivecomputations/dolphin-mistral-nemo:latest': 'Unrestricted assistant',
+};
+
+/**
+ * Get the display name for a model
+ * Falls back to the actual name if no mapping exists
+ * @param {string} actualName - The actual model name from Ollama
+ * @returns {string} - The user-friendly display name
+ */
+function getModelDisplayName(actualName) {
+  if (!actualName) return 'Unknown Model';
+  
+  // Check direct mapping first
+  if (MODEL_DISPLAY_NAMES[actualName]) {
+    return MODEL_DISPLAY_NAMES[actualName];
+  }
+  
+  // Try without :latest suffix
+  const withoutLatest = actualName.replace(':latest', '');
+  if (MODEL_DISPLAY_NAMES[withoutLatest]) {
+    return MODEL_DISPLAY_NAMES[withoutLatest];
+  }
+  
+  // Try base name only (before first colon)
+  const baseName = actualName.split(':')[0];
+  if (MODEL_DISPLAY_NAMES[baseName]) {
+    return MODEL_DISPLAY_NAMES[baseName];
+  }
+  
+  // No mapping found - create a friendly name from the actual name
+  // Capitalize first letter of each word and clean up
+  return actualName
+    .split(/[-_:]/)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Get the actual model name from a display name
+ * @param {string} displayName - The display name to look up
+ * @returns {string|null} - The actual model name or null if not found
+ */
+function getActualModelName(displayName) {
+  for (const [actual, display] of Object.entries(MODEL_DISPLAY_NAMES)) {
+    if (display === displayName) {
+      return actual;
+    }
+  }
+  return null;
+}
 
 // ============================================
 // Model Capabilities Detection (from Ollama API)
@@ -542,8 +621,8 @@ async function persistChat(chat) {
   }
 }
 
-async function createNewChat(type = 'normal') {
-  const result = await window.electronAPI.createChat(state.currentModel, type);
+async function createNewChat() {
+  const result = await window.electronAPI.createChat(state.currentModel);
   if (!result?.success || !result.chat) {
     throw new Error(result?.error || 'Failed to create chat');
   }
@@ -556,7 +635,6 @@ async function createNewChat(type = 'normal') {
       id: result.chat.id,
       title: result.chat.title,
       model: result.chat.model,
-      type: result.chat.type || 'normal',
       createdAt: result.chat.createdAt,
       updatedAt: result.chat.updatedAt,
       messageCount: result.chat.messages?.length || 0,
@@ -572,14 +650,13 @@ async function updateCurrentChat() {
 
   chat.messages = [...state.conversationHistory];
   chat.model = state.currentModel;
-  chat.type = state.currentChatType; // Preserve chat type
   chat.updatedAt = new Date().toISOString();
 
-  // Update title from first user message if still "New Chat" or "New Council Chat"
-  if ((chat.title === 'New Chat' || chat.title === 'New Council Chat') && chat.messages.length > 0) {
+  // Update title from first user message if still "New Chat"
+  if (chat.title === 'New Chat' && chat.messages.length > 0) {
     const firstUserMsg = chat.messages.find(m => m.role === 'user');
     if (firstUserMsg) {
-      const prefix = chat.type === 'council' ? '🏛️ ' : '';
+      const prefix = state.currentModel === AI_COUNCIL_MODEL ? '🏛️ ' : '';
       chat.title = prefix + firstUserMsg.content.slice(0, 50) + (firstUserMsg.content.length > 50 ? '...' : '');
     }
   }
@@ -597,34 +674,36 @@ async function loadChat(chatId) {
   state.currentChatId = chatId;
   state.conversationHistory = [...chat.messages];
   
-  // Set chat type and update council mode accordingly
-  state.currentChatType = chat.type || 'normal';
-  const isCouncilChat = state.currentChatType === 'council';
+  // Set model if available (includes AI Council pseudo model)
+  const modelToLoad = chat.model;
+  const isCouncilModel = modelToLoad === AI_COUNCIL_MODEL;
+  const modelExists = isCouncilModel || state.models.some(m => m.name === modelToLoad);
   
-  // Update council mode state
-  state.councilMode = isCouncilChat;
-  
-  // Set model if available
-  if (chat.model && state.models.some(m => m.name === chat.model)) {
-    state.currentModel = chat.model;
-    elements.modelSelect.value = chat.model;
-    setLastSelectedModelInStorage(chat.model);
+  if (modelToLoad && modelExists) {
+    state.currentModel = modelToLoad;
+    elements.modelSelect.value = modelToLoad;
+    setLastSelectedModelInStorage(modelToLoad);
     
-    // Fetch capabilities if not cached, then update settings
-    fetchModelCapabilities(chat.model).then(caps => {
-      updateSettingsUIForModel(chat.model);
-    });
-    
-    loadSettingsForModel(chat.model);
-    if (elements.settingsModal && elements.settingsModal.style.display !== 'none') {
-      updateSettingsUIForModel(chat.model);
-      loadSettingsToUI();
-    }
-    const model = state.models.find(m => m.name === chat.model);
-    if (model) {
-      updateModelInfo(model);
-      updateModelSelectorUI(model);
-      checkModelStatus();
+    if (!isCouncilModel) {
+      // Fetch capabilities if not cached, then update settings
+      fetchModelCapabilities(modelToLoad).then(caps => {
+        updateSettingsUIForModel(modelToLoad);
+      });
+      
+      loadSettingsForModel(modelToLoad);
+      if (elements.settingsModal && elements.settingsModal.style.display !== 'none') {
+        updateSettingsUIForModel(modelToLoad);
+        loadSettingsToUI();
+      }
+      const model = state.models.find(m => m.name === modelToLoad);
+      if (model) {
+        updateModelInfo(model);
+        updateModelSelectorUI(model);
+        checkModelStatus();
+      }
+    } else {
+      // Council pseudo model
+      updateModelSelectorUI({ name: AI_COUNCIL_MODEL });
     }
   }
   
@@ -689,6 +768,19 @@ async function clearAllChats() {
   state.savedChats = [];
   chatCache.clear();
   await startNewChat();
+  
+  // Ensure focus is restored after confirm dialog closes
+  // The native confirm dialog can leave focus in an undefined state
+  // Use a small delay to let the browser fully restore from the dialog
+  setTimeout(() => {
+    if (!elements.chatInput.disabled) {
+      // Blur any potentially focused element first
+      if (document.activeElement) {
+        document.activeElement.blur();
+      }
+      elements.chatInput.focus();
+    }
+  }, 50);
 }
 
 async function renameChat(chatId, newTitle) {
@@ -729,12 +821,12 @@ function renderChatList() {
   elements.chatList.innerHTML = state.savedChats.map(chat => {
     const isActive = chat.id === state.currentChatId;
     const isGenerating = state.activeGenerations.has(chat.id);
-    const isCouncilChat = chat.type === 'council';
+    const isCouncilChat = chat.model === AI_COUNCIL_MODEL;
     const date = new Date(chat.updatedAt);
     const timeStr = formatRelativeTime(date);
     const msgCount = typeof chat.messageCount === 'number' ? chat.messageCount : (chat.messages?.length || 0);
     const generatingIndicator = isGenerating ? '<span class=\"chat-generating-indicator\">●</span>' : '';
-    const typeIcon = isCouncilChat ? '<span class=\"chat-type-icon council\" title=\"Council Chat\">🏛️</span>' : '<span class=\"chat-type-icon normal\" title=\"Normal Chat\">💬</span>';
+    const typeIcon = isCouncilChat ? '<span class=\"chat-type-icon council\" title=\"Council Chat\">🏛️</span>' : '';
     
     return `
       <div class="chat-item ${isActive ? 'active' : ''} ${isGenerating ? 'generating' : ''} ${isCouncilChat ? 'council-chat' : ''}" data-chat-id="${chat.id}">
@@ -1253,88 +1345,88 @@ function createCouncilProgressMessage() {
       <span class="council-progress-title">AI Council Processing</span>
       <span class="council-progress-timer" id="council-timer">0s</span>
     </div>
-    <div class="council-progress-phases">
-      <div class="council-progress-phase" id="progress-phase-1" data-status="pending">
-        <span class="phase-status-icon">⏳</span>
-        <span class="phase-name">Phase 1: Chairman Planning</span>
-        <span class="phase-status-text">Pending</span>
-      </div>
-      <div class="council-progress-phase" id="progress-phase-2" data-status="pending">
-        <span class="phase-status-icon">⏳</span>
-        <span class="phase-name">Phase 2: Council Execution</span>
-        <span class="phase-status-text">Pending</span>
-      </div>
-      <div class="council-progress-phase" id="progress-phase-3" data-status="pending">
-        <span class="phase-status-icon">⏳</span>
-        <span class="phase-name">Phase 3: Final Synthesis</span>
-        <span class="phase-status-text">Pending</span>
-      </div>
+    <div class="council-progress-bar-container">
+      <div class="council-progress-bar" id="council-progress-bar"></div>
     </div>
-    <div class="council-progress-tasks" id="progress-tasks" style="display: none;">
-    </div>
+    <div class="council-progress-status" id="council-progress-status">Initializing...</div>
   `;
   return div;
 }
 
 /**
- * Update progress phase status in the inline message
+ * Update progress bar and status text
  */
 function updateProgressPhase(phaseNum, status, statusText = null) {
   if (!state.councilProgressDiv) return;
   
-  const phaseEl = state.councilProgressDiv.querySelector(`#progress-phase-${phaseNum}`);
-  if (!phaseEl) return;
+  const progressBar = state.councilProgressDiv.querySelector('#council-progress-bar');
+  const statusEl = state.councilProgressDiv.querySelector('#council-progress-status');
   
-  phaseEl.setAttribute('data-status', status);
+  // Calculate progress percentage based on phase
+  let progressPercent = 0;
+  if (status === 'running') {
+    if (phaseNum === 1) progressPercent = 15;
+    else if (phaseNum === 2) progressPercent = 40;
+    else if (phaseNum === 3) progressPercent = 80;
+  } else if (status === 'complete') {
+    if (phaseNum === 1) progressPercent = 30;
+    else if (phaseNum === 2) progressPercent = 75;
+    else if (phaseNum === 3) progressPercent = 100;
+  }
   
-  const iconEl = phaseEl.querySelector('.phase-status-icon');
-  const textEl = phaseEl.querySelector('.phase-status-text');
+  if (progressBar) {
+    progressBar.style.width = `${progressPercent}%`;
+  }
   
-  const icons = { 'pending': '⏳', 'running': '⚙️', 'complete': '✅', 'error': '❌' };
-  const defaultTexts = { 'pending': 'Pending', 'running': 'Running...', 'complete': 'Complete', 'error': 'Error' };
+  // Update status text
+  const defaultTexts = {
+    1: { running: 'Planning...', complete: 'Plan ready' },
+    2: { running: 'Council working...', complete: 'Council done' },
+    3: { running: 'Synthesizing...', complete: 'Complete' }
+  };
   
-  if (iconEl) iconEl.textContent = icons[status] || '⏳';
-  if (textEl) textEl.textContent = statusText || defaultTexts[status] || status;
+  if (statusEl) {
+    statusEl.textContent = statusText || defaultTexts[phaseNum]?.[status] || 'Processing...';
+  }
 }
 
 /**
- * Display tasks in progress message after Phase 1
+ * Display tasks in progress message after Phase 1 (simplified - just store plan)
  */
 function displayProgressTasks(plan) {
   if (!state.councilProgressDiv) return;
-  
   state.councilPlan = plan;
-  const tasksDiv = state.councilProgressDiv.querySelector('#progress-tasks');
-  if (!tasksDiv) return;
-  
-  tasksDiv.style.display = 'block';
-  tasksDiv.innerHTML = `
-    <div class="progress-tasks-header">Tasks:</div>
-    ${plan.map((task, i) => `
-      <div class="progress-task" id="progress-task-${i}" data-status="pending">
-        <span class="task-status-icon">⏳</span>
-        <span class="task-role">${escapeHtml(task.role)}</span>
-        <span class="task-desc">${escapeHtml(task.task_description.substring(0, 60))}${task.task_description.length > 60 ? '...' : ''}</span>
-        ${task.needs_search ? '<span class="task-search">🔍</span>' : ''}
-      </div>
-    `).join('')}
-  `;
+  // Update status to show task count
+  const statusEl = state.councilProgressDiv.querySelector('#council-progress-status');
+  if (statusEl) {
+    statusEl.textContent = `Executing ${plan.length} tasks...`;
+  }
 }
 
 /**
- * Update task status in progress message
+ * Update task status in progress message (simplified - update progress bar)
  */
 function updateProgressTask(taskIndex, status) {
   if (!state.councilProgressDiv) return;
   
-  const taskEl = state.councilProgressDiv.querySelector(`#progress-task-${taskIndex}`);
-  if (!taskEl) return;
+  const progressBar = state.councilProgressDiv.querySelector('#council-progress-bar');
+  const statusEl = state.councilProgressDiv.querySelector('#council-progress-status');
+  const totalTasks = state.councilPlan.length || 1;
   
-  taskEl.setAttribute('data-status', status);
-  
-  const iconEl = taskEl.querySelector('.task-status-icon');
-  const icons = { 'pending': '⏳', 'running': '⚙️', 'complete': '✅', 'error': '❌' };
-  if (iconEl) iconEl.textContent = icons[status] || '⏳';
+  if (status === 'complete' || status === 'error') {
+    // Calculate progress: 30% (phase1) + 45% spread across tasks
+    const taskProgress = 30 + ((taskIndex + 1) / totalTasks) * 45;
+    if (progressBar) {
+      progressBar.style.width = `${Math.min(taskProgress, 75)}%`;
+    }
+    if (statusEl) {
+      statusEl.textContent = `Task ${taskIndex + 1}/${totalTasks} complete`;
+    }
+  } else if (status === 'running') {
+    if (statusEl) {
+      statusEl.textContent = `Running task ${taskIndex + 1}/${totalTasks}...`;
+    }
+  }
 }
 
 /**
@@ -1504,120 +1596,25 @@ function appendCouncilResultMessage(result) {
   const messageDiv = document.createElement('div');
   messageDiv.className = 'message message-assistant message-council';
   
-  // Build the council result header
+  // Build simple header with metadata
   const headerHtml = `
     <div class="council-result-header">
       <span>🏛️</span>
       <h4>AI Council Response</h4>
-    </div>
-    <div class="council-result-meta">
-      <span class="council-meta-item">
-        <span class="council-meta-icon">⏱️</span>
-        ${(result.metadata?.duration / 1000).toFixed(1)}s
-      </span>
-      <span class="council-meta-item">
-        <span class="council-meta-icon">📋</span>
-        ${result.metadata?.taskCount || 0} tasks
-      </span>
-      <span class="council-meta-item">
-        <span class="council-meta-icon">✅</span>
-        ${result.metadata?.successfulTasks || 0} successful
+      <span class="council-result-stats">
+        ${(result.metadata?.duration / 1000).toFixed(1)}s · ${result.metadata?.taskCount || 0} tasks
       </span>
     </div>
   `;
   
-  // Build expandable sections for plan, thinking, and reports
-  let sectionsHtml = '';
-  
-  // Phase 1: Chairman's Thinking section
-  if (result.phaseData?.phase1?.thinking) {
-    sectionsHtml += `
-      <div class="council-section council-thinking-section" onclick="this.classList.toggle('expanded')">
-        <div class="council-section-header">
-          <span class="council-section-toggle">▶</span>
-          <span class="council-section-title">🧠 Chairman's Thinking (Phase 1)</span>
-        </div>
-        <div class="council-section-content">
-          <pre class="council-thinking-content">${escapeHtml(result.phaseData.phase1.thinking)}</pre>
-        </div>
-      </div>
-    `;
-  }
-  
-  // Plan section
-  if (result.plan && result.plan.length > 0) {
-    sectionsHtml += `
-      <div class="council-section" onclick="this.classList.toggle('expanded')">
-        <div class="council-section-header">
-          <span class="council-section-toggle">▶</span>
-          <span class="council-section-title">📋 Execution Plan (${result.plan.length} tasks)</span>
-        </div>
-        <div class="council-section-content">
-          ${result.plan.map((task, i) => `
-            <div class="council-report">
-              <div class="council-report-role">
-                ${i + 1}. ${escapeHtml(task.role)}
-                ${task.needs_search ? ' 🔍' : ''}
-              </div>
-              <div class="council-report-content">${escapeHtml(task.task_description)}</div>
-            </div>
-          `).join('')}
-        </div>
-      </div>
-    `;
-  }
-  
-  // Council reports section with individual thinking
-  if (result.councilResults && result.councilResults.length > 0) {
-    sectionsHtml += `
-      <div class="council-section" onclick="event.stopPropagation(); this.classList.toggle('expanded')">
-        <div class="council-section-header">
-          <span class="council-section-toggle">▶</span>
-          <span class="council-section-title">👥 Council Reports (${result.councilResults.length})</span>
-        </div>
-        <div class="council-section-content">
-          ${result.councilResults.map((report, i) => `
-            <div class="council-report">
-              <div class="council-report-role">
-                ${report.success ? '✅' : '❌'} ${escapeHtml(report.role)}
-              </div>
-              ${report.thinking ? `
-                <div class="council-report-thinking" onclick="event.stopPropagation(); this.classList.toggle('expanded')">
-                  <div class="council-thinking-toggle">🧠 View Thinking</div>
-                  <pre class="council-thinking-content">${escapeHtml(report.thinking)}</pre>
-                </div>
-              ` : ''}
-              <div class="council-report-content">${escapeHtml(report.response?.substring(0, 500) || '')}${report.response?.length > 500 ? '...' : ''}</div>
-            </div>
-          `).join('')}
-        </div>
-      </div>
-    `;
-  }
-  
-  // Phase 3: Synthesis Thinking section
-  if (result.phaseData?.phase3?.thinking) {
-    sectionsHtml += `
-      <div class="council-section council-thinking-section" onclick="this.classList.toggle('expanded')">
-        <div class="council-section-header">
-          <span class="council-section-toggle">▶</span>
-          <span class="council-section-title">🧠 Synthesis Thinking (Phase 3)</span>
-        </div>
-        <div class="council-section-content">
-          <pre class="council-thinking-content">${escapeHtml(result.phaseData.phase3.thinking)}</pre>
-        </div>
-      </div>
-    `;
-  }
-  
-  // Final response
+  // Final response only - no expandable sections
   const responseHtml = `
     <div class="message-content">
       ${renderMarkdown(result.finalResponse || '')}
     </div>
   `;
   
-  messageDiv.innerHTML = headerHtml + sectionsHtml + responseHtml;
+  messageDiv.innerHTML = headerHtml + responseHtml;
   
   elements.messages.appendChild(messageDiv);
   scrollToBottom();
@@ -1679,12 +1676,7 @@ function setupEventListeners() {
   });
   
   // New chat
-  elements.newChatBtn.addEventListener('click', () => startNewChat('normal'));
-  
-  // New council chat
-  if (elements.newCouncilChatBtn) {
-    elements.newCouncilChatBtn.addEventListener('click', () => startNewChat('council'));
-  }
+  elements.newChatBtn.addEventListener('click', () => startNewChat());
   
   // Clear all chats
   elements.clearAllChatsBtn.addEventListener('click', clearAllChats);
@@ -1779,6 +1771,28 @@ function setupEventListeners() {
 
 function getModelDescriptor(model) {
   if (!model) return '';
+  
+  // Check for custom descriptor first
+  const modelName = model.name;
+  if (modelName && MODEL_DESCRIPTORS[modelName]) {
+    return MODEL_DESCRIPTORS[modelName];
+  }
+  
+  // Try without :latest suffix
+  if (modelName) {
+    const withoutLatest = modelName.replace(':latest', '');
+    if (MODEL_DESCRIPTORS[withoutLatest]) {
+      return MODEL_DESCRIPTORS[withoutLatest];
+    }
+    
+    // Try base name only
+    const baseName = modelName.split(':')[0];
+    if (MODEL_DESCRIPTORS[baseName]) {
+      return MODEL_DESCRIPTORS[baseName];
+    }
+  }
+  
+  // Fallback: generate a basic descriptor
   const parts = [];
   
   // Add file size
@@ -1809,7 +1823,7 @@ function updateModelSelectorUI(model) {
     elements.modelSelectorDesc.textContent = '';
     return;
   }
-  elements.modelSelectorTitle.textContent = model.name || 'Select a model';
+  elements.modelSelectorTitle.textContent = getModelDisplayName(model.name) || 'Select a model';
   elements.modelSelectorDesc.textContent = getModelDescriptor(model);
 }
 
@@ -1820,18 +1834,24 @@ function renderModelSelectList(models) {
     return;
   }
 
-  elements.modelSelectList.innerHTML = models.map(m => {
+  // Add AI Council as a pseudo model at the top
+  const councilModel = { name: AI_COUNCIL_MODEL, isPseudo: true };
+  const allModels = [councilModel, ...models];
+
+  elements.modelSelectList.innerHTML = allModels.map(m => {
     const isActive = m.name === state.currentModel;
     const desc = escapeHtml(getModelDescriptor(m));
+    const displayName = getModelDisplayName(m.name);
+    const isCouncil = m.name === AI_COUNCIL_MODEL;
     return `
       <button
         type="button"
-        class="model-select-item ${isActive ? 'active' : ''}"
+        class="model-select-item ${isActive ? 'active' : ''} ${isCouncil ? 'council-model' : ''}"
         data-model-name="${escapeHtml(m.name)}"
         aria-selected="${isActive ? 'true' : 'false'}"
       >
         <div class="model-select-item-text">
-          <div class="model-select-item-name">${escapeHtml(m.name)}</div>
+          <div class="model-select-item-name">${isCouncil ? '🏛️ ' : ''}${escapeHtml(displayName)}</div>
           <div class="model-select-item-desc">${desc}</div>
         </div>
         <div class="model-select-item-check" aria-hidden="true">✓</div>
@@ -1916,36 +1936,46 @@ async function refreshModels() {
 }
 
 function populateModelSelect(models) {
-  elements.modelSelect.innerHTML = models
-    .map(m => `<option value="${m.name}">${m.name}</option>`)
+  // Add AI Council as first option
+  const councilOption = `<option value="${AI_COUNCIL_MODEL}">AI Council</option>`;
+  const modelOptions = models
+    .map(m => `<option value="${m.name}">${getModelDisplayName(m.name)}</option>`)
     .join('');
+  elements.modelSelect.innerHTML = councilOption + modelOptions;
   elements.modelSelect.disabled = false;
   elements.modelSelectorBtn.disabled = false;
   
-  // Select last-used model if available, otherwise first model
+  // Select last-used model if available, otherwise first real model (not council)
   if (models.length > 0) {
     const lastModel = getLastSelectedModelFromStorage();
-    const preferred = lastModel && models.some(m => m.name === lastModel) ? lastModel : models[0].name;
+    // Check if last model exists in the real models list or is the council
+    const isValidLastModel = lastModel === AI_COUNCIL_MODEL || models.some(m => m.name === lastModel);
+    const preferred = lastModel && isValidLastModel ? lastModel : models[0].name;
 
     state.currentModel = preferred;
     elements.modelSelect.value = preferred;
     setLastSelectedModelInStorage(preferred);
     
-    // Fetch model capabilities async (don't block UI)
-    fetchModelCapabilities(preferred).then(caps => {
-      if (caps) {
-        applyModelDefaultsToSettings(preferred);
-        updateSettingsUIForModel(preferred);
-      }
-      loadSettingsForModel(preferred);
-      // Update model info with API data
+    // Fetch model capabilities async (don't block UI) - skip for council pseudo model
+    if (preferred !== AI_COUNCIL_MODEL) {
+      fetchModelCapabilities(preferred).then(caps => {
+        if (caps) {
+          applyModelDefaultsToSettings(preferred);
+          updateSettingsUIForModel(preferred);
+        }
+        loadSettingsForModel(preferred);
+        // Update model info with API data
+        const model = models.find(m => m.name === preferred) || models[0];
+        updateModelInfo(model);
+      });
+
       const model = models.find(m => m.name === preferred) || models[0];
       updateModelInfo(model);
-    });
-
-    const model = models.find(m => m.name === preferred) || models[0];
-    updateModelInfo(model);
-    updateModelSelectorUI(model);
+      updateModelSelectorUI(model);
+    } else {
+      // Council pseudo model selected
+      updateModelSelectorUI({ name: AI_COUNCIL_MODEL });
+    }
     
     // Update vision UI for selected model
     updateVisionUI();
@@ -1974,6 +2004,14 @@ async function handleModelChange() {
   const modelName = elements.modelSelect.value;
   state.currentModel = modelName;
   setLastSelectedModelInStorage(modelName);
+  
+  // Handle AI Council pseudo model
+  if (modelName === AI_COUNCIL_MODEL) {
+    updateModelSelectorUI({ name: AI_COUNCIL_MODEL });
+    elements.modelInfoSection.style.display = 'none';
+    updateVisionUI();
+    return;
+  }
   
   // Fetch model capabilities from Ollama API (async, cached)
   const caps = await fetchModelCapabilities(modelName);
@@ -2074,7 +2112,7 @@ async function checkModelStatus() {
         state.modelLoaded = true;
         
         // Calculate VRAM usage if available
-        let statusText = `${state.currentModel.split(':')[0]} loaded`;
+        let statusText = `${getModelDisplayName(state.currentModel)} loaded`;
         if (runningModel.size_vram) {
           const vramGB = (runningModel.size_vram / 1e9).toFixed(1);
           statusText += ` (${vramGB}GB VRAM)`;
@@ -2099,7 +2137,7 @@ async function checkModelStatus() {
         updateModelStatusUI('loaded', statusText);
       } else {
         state.modelLoaded = false;
-        updateModelStatusUI('unloaded', `${state.currentModel.split(':')[0]} not loaded`);
+        updateModelStatusUI('unloaded', `${getModelDisplayName(state.currentModel)} not loaded`);
       }
     } else {
       state.modelLoaded = false;
@@ -2139,7 +2177,7 @@ function updateModelStatusUI(status, text) {
 // Update status when generation starts/ends
 function setModelStatusGenerating(isGenerating) {
   if (isGenerating) {
-    updateModelStatusUI('loading', `${state.currentModel.split(':')[0]} generating...`);
+    updateModelStatusUI('loading', `${getModelDisplayName(state.currentModel)} generating...`);
   } else {
     // Re-check status after generation
     checkModelStatus();
@@ -2159,7 +2197,7 @@ async function unloadModel() {
   try {
     const result = await window.electronAPI.unloadModel(state.currentModel);
     if (result.success) {
-      updateModelStatusUI('unloaded', `${state.currentModel.split(':')[0]} unloaded`);
+      updateModelStatusUI('unloaded', `${getModelDisplayName(state.currentModel)} unloaded`);
       state.modelLoaded = false;
       showNotification('Model unloaded from VRAM');
     } else {
@@ -2182,8 +2220,8 @@ async function sendMessage() {
   // Need either content or attachments (with content) for vision models
   if (!content || !state.currentModel) return;
   
-  // Check if council mode is active - route to council workflow
-  if (state.councilMode) {
+  // Check if AI Council pseudo model is selected - route to council workflow
+  if (state.currentModel === AI_COUNCIL_MODEL) {
     // Clear input first
     elements.chatInput.value = '';
     handleInputChange();
@@ -2412,19 +2450,14 @@ async function stopGeneration() {
   }
 }
 
-async function startNewChat(type = null) {
-  // Use the provided type, or default based on current council mode
-  const chatType = type || (state.councilMode ? 'council' : 'normal');
-  
-  // Create new chat in storage with type
-  const chat = await createNewChat(chatType);
+async function startNewChat() {
+  // Create new chat in storage
+  const chat = await createNewChat();
   state.currentChatId = chat.id;
-  state.currentChatType = chatType;
   state.conversationHistory = [];
   
-  // Sync council mode with new chat type
-  const isCouncil = chatType === 'council';
-  state.councilMode = isCouncil;
+  // Check if AI Council is currently selected
+  const isCouncil = state.currentModel === AI_COUNCIL_MODEL;
   
   const welcomeTitle = isCouncil ? 'AI Council Mode' : 'Welcome to LocalLM Agent';
   const welcomeDesc = isCouncil 
@@ -3125,7 +3158,6 @@ function renderMarkdown(text) {
     return `
       <details class="think-block">
         <summary class="think-summary">
-          <span class="think-icon">💭</span>
           <span class="think-label">Thinking</span>
           <span class="think-chevron">▶</span>
         </summary>
@@ -3141,7 +3173,6 @@ function renderMarkdown(text) {
     return `
       <details class="think-block think-block-streaming" open>
         <summary class="think-summary">
-          <span class="think-icon">💭</span>
           <span class="think-label">Thinking<span class="thinking-dots"><span>.</span><span>.</span><span>.</span></span></span>
           <span class="think-chevron">▶</span>
         </summary>

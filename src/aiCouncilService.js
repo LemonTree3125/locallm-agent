@@ -2,8 +2,9 @@
  * AICouncilService - Dynamic AI Council Backend Service
  * 
  * Implements a "Manager-Worker" workflow using local Ollama models:
- * - Chairman (qwen3:14b): Strategic planning and final synthesis
- * - Council Members (qwen3:8b): Task execution with tool support
+ * - All phases use qwen3:14b with thinking mode enabled
+ * - Chairman: Strategic planning (Phase 1) and final synthesis (Phase 3)
+ * - Council Members: Task execution with tool support (Phase 2)
  * 
  * @author AI Council Framework
  */
@@ -14,7 +15,20 @@
 
 const OLLAMA_BASE_URL = 'http://localhost:11434';
 const CHAIRMAN_MODEL = 'qwen3:14b';
-const MEMBER_MODEL = 'qwen3:8b';
+const MEMBER_MODEL = 'qwen3:14b';
+
+/**
+ * Get current date formatted for system prompts
+ */
+function getCurrentDateString() {
+    const now = new Date();
+    return now.toLocaleDateString('en-US', { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+    });
+}
 
 // ============================================================================
 // TOOL DEFINITIONS
@@ -214,7 +228,7 @@ async function ensureSingleModelLoaded(targetModel) {
  * @param {object} [options.options] - Additional model options
  * @returns {Promise<object>} - API response
  */
-async function ollamaChat({ model, messages, tools = null, format = null, options = {} }) {
+async function ollamaChat({ model, messages, tools = null, format = null, options = {}, think = false }) {
     const requestBody = {
         model,
         messages,
@@ -224,6 +238,11 @@ async function ollamaChat({ model, messages, tools = null, format = null, option
             ...options
         }
     };
+
+    // Enable thinking mode if requested
+    if (think) {
+        requestBody.think = true;
+    }
 
     // Add tools if provided
     if (tools && tools.length > 0) {
@@ -308,6 +327,8 @@ class AICouncilService {
         // So we ask for { "tasks": [...] } format
         const systemPrompt = `You are the Chairman of an AI Council. Analyze the user query and create a strategic execution plan.
 
+Today's date: ${getCurrentDateString()}
+
 CRITICAL: Your response must be ONLY valid JSON with this exact structure:
 {
   "tasks": [
@@ -332,6 +353,7 @@ Output ONLY the JSON object. No explanations, no markdown code blocks, no other 
                     { role: 'user', content: userPrompt }
                 ],
                 format: 'json',
+                think: true,
                 options: { temperature: 0.3 } // Lower temperature for more structured output
             });
 
@@ -515,7 +537,7 @@ Output ONLY the JSON object. No explanations, no markdown code blocks, no other 
     /**
      * PHASE 2: Council Member Execution
      * 
-     * Execute all tasks SEQUENTIALLY using council members (qwen3:8b).
+     * Execute all tasks SEQUENTIALLY using council members (qwen3:14b).
      * Only one prompt runs at a time to ensure single-model VRAM usage.
      * Each member adopts their assigned persona and may use tools.
      * 
@@ -524,13 +546,10 @@ Output ONLY the JSON object. No explanations, no markdown code blocks, no other 
      * @returns {Promise<array>} - Array of task results
      */
     async executePhase2_CouncilExecution(originalPrompt, plan) {
-        this.log(`Phase 2: Executing ${plan.length} tasks sequentially (single-model VRAM mode)...`);
+        this.log(`Phase 2: Executing ${plan.length} tasks sequentially...`);
         this.onPhaseStart({ phase: 2, name: 'Council Execution', taskCount: plan.length });
 
-        // Unload chairman model before loading member model
-        await unloadModel(this.chairmanModel);
-        
-        // Ensure member model is the only one loaded
+        // All phases use the same model now, so just ensure it's loaded
         await ensureSingleModelLoaded(this.memberModel);
 
         // Execute tasks SEQUENTIALLY - one at a time
@@ -573,6 +592,8 @@ Output ONLY the JSON object. No explanations, no markdown code blocks, no other 
         this.onTaskStart({ taskIndex, role, task_description });
 
         const systemPrompt = `You are ${role}, a member of an expert AI Council.
+
+Today's date: ${getCurrentDateString()}
 
 YOUR ROLE: ${role}
 YOUR SPECIFIC TASK: ${task_description}
@@ -657,7 +678,8 @@ Provide your expert contribution to help answer the user's query.`;
             const response = await ollamaChat({
                 model: this.memberModel,
                 messages: currentMessages,
-                tools: tools
+                tools: tools,
+                think: true
             });
 
             const message = response.message;
@@ -731,10 +753,7 @@ Provide your expert contribution to help answer the user's query.`;
         this.log('Phase 3: Chairman synthesizing final response...');
         this.onPhaseStart({ phase: 3, name: 'Final Synthesis' });
 
-        // Unload member model before loading chairman model
-        await unloadModel(this.memberModel);
-        
-        // Ensure chairman model is the only one loaded
+        // All phases use the same model now, so just ensure it's loaded
         await ensureSingleModelLoaded(this.chairmanModel);
 
         // Format the council reports for the Chairman
@@ -749,6 +768,8 @@ ${result.response}
         }).join('\n---\n');
 
         const systemPrompt = `You are the Chairman of an AI Council. Your council members have completed their assigned tasks, and you must now synthesize their reports into a final, cohesive answer.
+
+Today's date: ${getCurrentDateString()}
 
 INSTRUCTIONS:
 1. Review all expert reports carefully
@@ -776,6 +797,7 @@ Please synthesize these expert reports into a final, comprehensive answer to the
                     { role: 'system', content: systemPrompt },
                     { role: 'user', content: userMessage }
                 ],
+                think: true,
                 options: { temperature: 0.5 }
             });
 

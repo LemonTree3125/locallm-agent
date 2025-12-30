@@ -94,7 +94,6 @@ function buildChatSummary(chat) {
     id: chat.id,
     title: chat.title || 'New Chat',
     model: chat.model || null,
-    type: chat.type || 'normal', // 'normal' or 'council'
     createdAt: chat.createdAt,
     updatedAt: chat.updatedAt,
     messageCount: Array.isArray(chat.messages) ? chat.messages.length : 0,
@@ -348,15 +347,14 @@ ipcMain.handle('chats:load', async (_event, chatId) => {
   }
 });
 
-ipcMain.handle('chats:create', async (_event, { model = null, type = 'normal' } = {}) => {
+ipcMain.handle('chats:create', async (_event, { model = null } = {}) => {
   try {
     await ensureChatStoreDirs();
     const now = new Date().toISOString();
     const chat = {
       id: generateChatId(),
-      title: type === 'council' ? 'New Council Chat' : 'New Chat',
+      title: 'New Chat',
       model,
-      type, // 'normal' or 'council'
       createdAt: now,
       updatedAt: now,
       messages: [],

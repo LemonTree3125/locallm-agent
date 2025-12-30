@@ -1348,6 +1348,30 @@ textarea::placeholder {
   white-space: nowrap;
 }
 
+/* Model Reference Table */
+.model-reference-table {
+  background-color: var(--bg-secondary);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.model-reference-table th {
+  background-color: var(--accent-color);
+  color: white;
+}
+
+.model-reference-table td:first-child {
+  font-weight: 500;
+  color: var(--accent-color);
+}
+
+.help-note {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  font-style: italic;
+  margin-bottom: 8px;
+}
+
 /* ============================================
    Settings Modal
    ============================================ */
@@ -2097,205 +2121,15 @@ textarea::placeholder {
   font-size: 0.95rem;
   font-weight: 600;
   color: var(--accent-primary);
-}
-
-.council-result-meta {
-  display: flex;
-  gap: 16px;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-}
-
-.council-meta-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.8rem;
-  color: var(--text-secondary);
-}
-
-.council-meta-icon {
-  font-size: 0.9rem;
-}
-
-/* Council Expandable Sections */
-.council-section {
-  margin-bottom: 12px;
-}
-
-.council-section-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  background-color: var(--bg-tertiary);
-  border-radius: 6px;
-  cursor: pointer;
-  user-select: none;
-  transition: background-color 0.2s;
-}
-
-.council-section-header:hover {
-  background-color: var(--bg-secondary);
-}
-
-.council-section-toggle {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  transition: transform 0.2s;
-}
-
-.council-section.expanded .council-section-toggle {
-  transform: rotate(90deg);
-}
-
-.council-section-title {
   flex: 1;
-  font-size: 0.85rem;
-  font-weight: 500;
-  color: var(--text-primary);
 }
 
-.council-section-content {
-  display: none;
-  padding: 12px;
-  background-color: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-top: none;
-  border-radius: 0 0 6px 6px;
-}
-
-.council-section.expanded .council-section-content {
-  display: block;
-}
-
-.council-report {
-  padding: 10px;
-  margin-bottom: 8px;
-  background-color: var(--bg-tertiary);
-  border-radius: 6px;
-}
-
-.council-report:last-child {
-  margin-bottom: 0;
-}
-
-.council-report-role {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--accent-primary);
-  margin-bottom: 6px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.council-report-content {
-  font-size: 0.85rem;
-  color: var(--text-secondary);
-  line-height: 1.5;
-}
-
-/* Phase 1 Tasks Display */
-.phase-tasks {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.phase-task-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  background-color: var(--bg-primary);
-  border-radius: 4px;
+.council-result-stats {
   font-size: 0.8rem;
-}
-
-.phase-task-role {
-  font-weight: 600;
-  color: var(--accent-primary);
-}
-
-.phase-task-desc {
   color: var(--text-secondary);
-  flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.phase-task-search {
-  font-size: 0.75rem;
-  color: var(--accent-warning);
-}
-
-/* Council Thinking Sections */
-.council-thinking-section .council-section-header {
-  background: linear-gradient(135deg, rgba(147, 112, 219, 0.2) 0%, rgba(138, 43, 226, 0.2) 100%);
-  border-color: rgba(147, 112, 219, 0.4);
-}
-
-.council-thinking-section .council-section-title {
-  color: #b794f6;
-}
-
-.council-thinking-content {
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  font-family: 'Consolas', 'Monaco', monospace;
-  font-size: 0.8rem;
-  line-height: 1.5;
-  color: var(--text-secondary);
-  background-color: var(--bg-tertiary);
-  padding: 12px;
-  border-radius: 6px;
-  margin: 0;
-  max-height: 400px;
-  overflow-y: auto;
-}
-
-/* Nested thinking toggle in council reports */
-.council-report-thinking {
-  margin: 8px 0;
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.council-report-thinking .council-thinking-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  background: rgba(147, 112, 219, 0.2);
-  border: 1px solid rgba(147, 112, 219, 0.3);
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.75rem;
-  color: #b794f6;
-  transition: all 0.2s ease;
-}
-
-.council-report-thinking .council-thinking-toggle:hover {
-  background: rgba(147, 112, 219, 0.3);
-}
-
-.council-report-thinking .council-thinking-content {
-  display: none;
-  margin-top: 8px;
-  max-height: 200px;
-}
-
-.council-report-thinking.expanded .council-thinking-content {
-  display: block;
-}
-
-.council-report-thinking.expanded .council-thinking-toggle {
-  background: rgba(147, 112, 219, 0.35);
-}
-
-/* ===== Inline Council Progress Message ===== */
+/* ===== Inline Council Progress Message ===== */ */
 .message-council-progress {
   background: linear-gradient(135deg, 
     rgba(138, 92, 246, 0.08) 0%, 
@@ -2311,8 +2145,6 @@ textarea::placeholder {
   align-items: center;
   gap: 10px;
   margin-bottom: 16px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid rgba(138, 92, 246, 0.2);
 }
 
 .council-progress-icon {
@@ -2322,7 +2154,7 @@ textarea::placeholder {
 .council-progress-title {
   font-weight: 600;
   font-size: 1rem;
-  color: var(--accent-primary);
+  color: var(--text-primary);
   flex: 1;
 }
 
@@ -2335,153 +2167,27 @@ textarea::placeholder {
   border-radius: 12px;
 }
 
-/* Progress Phases */
-.council-progress-phases {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-
-.council-progress-phase {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  background: rgba(0, 0, 0, 0.15);
-  border-radius: 8px;
-  transition: all 0.3s ease;
-}
-
-.council-progress-phase[data-status="pending"] {
-  opacity: 0.5;
-}
-
-.council-progress-phase[data-status="running"] {
-  opacity: 1;
-  background: rgba(138, 92, 246, 0.15);
-  border: 1px solid rgba(138, 92, 246, 0.3);
-}
-
-.council-progress-phase[data-status="complete"] {
-  opacity: 0.8;
-  background: rgba(34, 197, 94, 0.1);
-  border: 1px solid rgba(34, 197, 94, 0.25);
-}
-
-.council-progress-phase[data-status="error"] {
-  opacity: 1;
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.25);
-}
-
-.phase-status-icon {
-  font-size: 1.1rem;
-  width: 24px;
-  text-align: center;
-}
-
-.phase-number {
-  font-weight: 600;
-  font-size: 0.8rem;
-  color: var(--text-secondary);
-  background: rgba(255, 255, 255, 0.1);
-  padding: 2px 8px;
+/* Progress Bar */
+.council-progress-bar-container {
+  width: 100%;
+  height: 8px;
+  background: rgba(0, 0, 0, 0.3);
   border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 12px;
 }
 
-.phase-name {
-  flex: 1;
-  font-size: 0.9rem;
-  color: var(--text-primary);
+.council-progress-bar {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #8b5cf6, #a78bfa);
+  border-radius: 4px;
+  transition: width 0.3s ease;
 }
 
-.phase-status-text {
-  font-size: 0.8rem;
-  color: var(--text-secondary);
-  font-style: italic;
-}
-
-/* Progress Tasks */
-.council-progress-tasks {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid rgba(138, 92, 246, 0.15);
-}
-
-.progress-tasks-header {
+.council-progress-status {
   font-size: 0.85rem;
-  font-weight: 600;
   color: var(--text-secondary);
-  margin-bottom: 10px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.progress-tasks-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.progress-task {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  background: rgba(0, 0, 0, 0.1);
-  border-radius: 6px;
-  font-size: 0.85rem;
-  transition: all 0.2s ease;
-}
-
-.progress-task[data-status="pending"] {
-  opacity: 0.5;
-}
-
-.progress-task[data-status="running"] {
-  opacity: 1;
-  background: rgba(59, 130, 246, 0.15);
-  border: 1px solid rgba(59, 130, 246, 0.25);
-}
-
-.progress-task[data-status="complete"] {
-  opacity: 0.7;
-  background: rgba(34, 197, 94, 0.08);
-}
-
-.progress-task[data-status="error"] {
-  opacity: 1;
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.2);
-}
-
-.task-status-indicator {
-  font-size: 0.9rem;
-  width: 20px;
   text-align: center;
-}
-
-.task-number {
-  font-weight: 600;
-  font-size: 0.75rem;
-  color: var(--text-muted);
-}
-
-.task-description {
-  flex: 1;
-  color: var(--text-primary);
-}
-
-/* Spinning animation for running tasks */
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.progress-task[data-status="running"] .task-status-indicator,
-.council-progress-phase[data-status="running"] .phase-status-icon {
-  animation: spin 1s linear infinite;
 }
 

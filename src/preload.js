@@ -101,7 +101,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   listChats: () => ipcRenderer.invoke('chats:list'),
   loadChat: (chatId) => ipcRenderer.invoke('chats:load', chatId),
-  createChat: (model = null, type = 'normal') => ipcRenderer.invoke('chats:create', { model, type }),
+  createChat: (model = null) => ipcRenderer.invoke('chats:create', { model }),
   updateChat: (chat) => ipcRenderer.invoke('chats:update', chat),
   renameChat: (chatId, title) => ipcRenderer.invoke('chats:rename', { chatId, title }),
   deleteChat: (chatId) => ipcRenderer.invoke('chats:delete', chatId),

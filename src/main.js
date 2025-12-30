@@ -18,6 +18,276 @@ let mainWindow;
 let currentAbortController = null;
 
 // ============================================
+// Ghost Text Native Addon & Configuration
+// ============================================
+
+let ghostTextAddon = null;
+let ghostTextEnabled = false;
+let ghostTextModel = 'qwen3:1.7b'; // Default to faster model
+let ghostTextAbortController = null;
+let ghostTextRequestPending = false;
+
+// Ollama API endpoint for direct fetch (supports AbortController)
+const OLLAMA_API_URL = 'http://localhost:11434/api/generate';
+
+/**
+ * Load the Ghost Text native addon
+ */
+function loadGhostTextAddon() {
+  try {
+    // Try release build first, then debug
+    try {
+      ghostTextAddon = require('../native/build/Release/ghost_text.node');
+    } catch {
+      ghostTextAddon = require('../native/build/Debug/ghost_text.node');
+    }
+    console.log('[GhostText] Native addon loaded successfully');
+    return true;
+  } catch (error) {
+    console.error('[GhostText] Failed to load native addon:', error.message);
+    ghostTextAddon = null;
+    return false;
+  }
+}
+
+/**
+ * Initialize Ghost Text system
+ */
+function initializeGhostText() {
+  if (!ghostTextAddon) {
+    if (!loadGhostTextAddon()) {
+      return false;
+    }
+  }
+
+  try {
+    // Initialize the addon (creates UIA, D2D resources)
+    const initialized = ghostTextAddon.initialize();
+    if (!initialized) {
+      console.error('[GhostText] Failed to initialize addon');
+      return false;
+    }
+
+    // Start monitoring with our callback
+    ghostTextAddon.startMonitoring(onGhostTextCallback);
+    ghostTextEnabled = true;
+    console.log('[GhostText] System initialized and monitoring started');
+    return true;
+  } catch (error) {
+    console.error('[GhostText] Initialization error:', error.message);
+    return false;
+  }
+}
+
+/**
+ * Shutdown Ghost Text system
+ */
+function shutdownGhostText() {
+  if (ghostTextAddon && ghostTextEnabled) {
+    try {
+      // Cancel any pending request
+      if (ghostTextAbortController) {
+        ghostTextAbortController.abort();
+        ghostTextAbortController = null;
+      }
+      
+      ghostTextAddon.stopMonitoring();
+      ghostTextAddon.hideOverlay();
+      ghostTextAddon.shutdown();
+      ghostTextEnabled = false;
+      console.log('[GhostText] System shut down');
+    } catch (error) {
+      console.error('[GhostText] Shutdown error:', error.message);
+    }
+  }
+}
+
+/**
+ * Callback from C++ addon when typing pauses
+ * @param {string} event - Event type ('typingPaused')
+ * @param {object} data - Context data { text, caret: { x, y, valid }, processName, windowTitle }
+ */
+async function onGhostTextCallback(event, data) {
+  console.log(`[GhostText] Callback received: event="${event}", enabled=${ghostTextEnabled}`);
+  console.log(`[GhostText] Data:`, JSON.stringify(data, null, 2));
+  
+  if (event !== 'typingPaused' || !ghostTextEnabled) {
+    console.log('[GhostText] Skipping - wrong event or disabled');
+    return;
+  }
+
+  // Input validation: need sufficient text context
+  if (!data || !data.text || data.text.trim().length < 5) {
+    console.log(`[GhostText] Skipping - insufficient text: "${data?.text}"`);
+    ghostTextAddon.hideOverlay();
+    return;
+  }
+
+  // Need valid caret position
+  if (!data.caret || !data.caret.valid) {
+    console.log(`[GhostText] Skipping - invalid caret:`, data?.caret);
+    ghostTextAddon.hideOverlay();
+    return;
+  }
+
+  console.log(`[GhostText] Processing context from ${data.processName}: "${data.text.slice(-50)}"`);
+  console.log(`[GhostText] Caret at (${data.caret.x}, ${data.caret.y})`);
+
+  // Concurrency control: abort any pending request
+  if (ghostTextAbortController) {
+    ghostTextAbortController.abort();
+    ghostTextAbortController = null;
+  }
+
+  // Create new abort controller for this request
+  ghostTextAbortController = new AbortController();
+  const { signal } = ghostTextAbortController;
+
+  try {
+    ghostTextRequestPending = true;
+
+    // Prepare the prompt for inline completion
+    const contextText = data.text.slice(-200); // Last 200 chars for context
+    const prompt = buildGhostTextPrompt(contextText);
+
+    console.log(`[GhostText] Calling Ollama API with model: ${ghostTextModel}`);
+    
+    // Call Ollama API with abort support
+    const response = await fetch(OLLAMA_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: ghostTextModel,
+        prompt: prompt,
+        stream: false,
+        options: {
+          num_predict: 5,      // Short completions only
+          temperature: 0.1,    // Very deterministic
+          stop: ['\n', '.'],   // Stop at sentence boundaries
+        },
+      }),
+      signal: signal,
+    });
+
+    console.log(`[GhostText] Ollama response status: ${response.status}`);
+
+    // Check if aborted during fetch
+    if (signal.aborted) {
+      console.log('[GhostText] Request aborted after fetch');
+      return;
+    }
+
+    if (!response.ok) {
+      console.error('[GhostText] Ollama API error:', response.status);
+      ghostTextAddon.hideOverlay();
+      return;
+    }
+
+    const result = await response.json();
+    console.log(`[GhostText] Ollama result:`, JSON.stringify(result).slice(0, 200));
+
+    // Check if aborted during JSON parse
+    if (signal.aborted) {
+      console.log('[GhostText] Request aborted after JSON parse');
+      return;
+    }
+
+    // Extract and validate response
+    const completion = result.response?.trim();
+    console.log(`[GhostText] Raw completion: "${completion}"`);
+    
+    if (completion && completion.length > 0 && completion.length <= 50) {
+      // Clean up the completion text
+      const cleanCompletion = cleanGhostTextResponse(completion);
+      console.log(`[GhostText] Cleaned completion: "${cleanCompletion}"`);
+      
+      if (cleanCompletion) {
+        // Position overlay just after the caret
+        const x = data.caret.x + (data.caret.width || 2);
+        const y = data.caret.y;
+        
+        console.log(`[GhostText] Calling updateOverlay("${cleanCompletion}", ${x}, ${y})`);
+        ghostTextAddon.updateOverlay(cleanCompletion, x, y);
+        console.log(`[GhostText] Showing: "${cleanCompletion}" at (${x}, ${y})`);
+      } else {
+        console.log('[GhostText] Clean completion was empty, hiding overlay');
+        ghostTextAddon.hideOverlay();
+      }
+    } else {
+      console.log(`[GhostText] Completion invalid (length=${completion?.length}), hiding overlay`);
+      ghostTextAddon.hideOverlay();
+    }
+
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      // Request was cancelled, this is expected behavior
+      console.log('[GhostText] Request cancelled (new keystroke)');
+    } else {
+      console.error('[GhostText] Completion error:', error.message);
+      ghostTextAddon.hideOverlay();
+    }
+  } finally {
+    ghostTextRequestPending = false;
+    // Clear the abort controller if it's still ours
+    if (ghostTextAbortController && ghostTextAbortController.signal === signal) {
+      ghostTextAbortController = null;
+    }
+  }
+}
+
+/**
+ * Build prompt for ghost text completion
+ * @param {string} context - Text before cursor
+ * @returns {string} - Formatted prompt
+ */
+function buildGhostTextPrompt(context) {
+  return `Continue this text with a brief completion (1-5 words). Output ONLY the continuation, no quotes or explanation.
+
+Text: ${context}
+Continuation:`;
+}
+
+/**
+ * Clean up the ghost text response
+ * @param {string} text - Raw response from LLM
+ * @returns {string|null} - Cleaned text or null if invalid
+ */
+function cleanGhostTextResponse(text) {
+  if (!text) return null;
+  
+  // Remove leading/trailing whitespace
+  let cleaned = text.trim();
+  
+  // Remove quotes if the model wrapped the response
+  if ((cleaned.startsWith('"') && cleaned.endsWith('"')) ||
+      (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
+    cleaned = cleaned.slice(1, -1);
+  }
+  
+  // Remove leading punctuation (except common starters)
+  cleaned = cleaned.replace(/^[\s,;:]+/, '');
+  
+  // Remove any "Continuation:" prefix the model might echo
+  cleaned = cleaned.replace(/^(continuation|continue|text):\s*/i, '');
+  
+  // Validate: must have some alphanumeric content
+  if (!/[a-zA-Z0-9]/.test(cleaned)) {
+    return null;
+  }
+  
+  // Truncate if too long
+  if (cleaned.length > 50) {
+    // Find a good break point
+    const breakPoint = cleaned.lastIndexOf(' ', 50);
+    cleaned = breakPoint > 10 ? cleaned.slice(0, breakPoint) : cleaned.slice(0, 50);
+  }
+  
+  return cleaned || null;
+}
+
+// ============================================
 // Chat Storage (File-based)
 // ============================================
 
@@ -923,11 +1193,101 @@ ipcMain.handle('council:set-config', async (event, config) => {
 });
 
 // ============================================
+// Ghost Text IPC Handlers
+// ============================================
+
+// Update Ghost Text configuration (model selection)
+ipcMain.handle('ghost-text:update-config', async (event, config) => {
+  try {
+    if (config.model) {
+      // Validate model is one of the allowed options
+      const allowedModels = ['qwen3:4b', 'qwen3:1.7b'];
+      if (allowedModels.includes(config.model)) {
+        ghostTextModel = config.model;
+        console.log(`[GhostText] Model switched to: ${ghostTextModel}`);
+      } else {
+        return { 
+          success: false, 
+          error: `Invalid model. Allowed: ${allowedModels.join(', ')}` 
+        };
+      }
+    }
+
+    if (typeof config.enabled === 'boolean') {
+      if (config.enabled && !ghostTextEnabled) {
+        initializeGhostText();
+      } else if (!config.enabled && ghostTextEnabled) {
+        shutdownGhostText();
+      }
+    }
+
+    return {
+      success: true,
+      config: {
+        model: ghostTextModel,
+        enabled: ghostTextEnabled,
+      },
+    };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Get current Ghost Text configuration
+ipcMain.handle('ghost-text:get-config', async () => {
+  return {
+    model: ghostTextModel,
+    enabled: ghostTextEnabled,
+    available: ghostTextAddon !== null,
+  };
+});
+
+// Manually trigger Ghost Text enable/disable
+ipcMain.handle('ghost-text:toggle', async (event, enabled) => {
+  console.log(`[GhostText] Toggle request received: enabled=${enabled}`);
+  try {
+    if (enabled) {
+      console.log('[GhostText] Attempting to initialize...');
+      const success = initializeGhostText();
+      console.log(`[GhostText] Initialize result: success=${success}, enabled=${ghostTextEnabled}`);
+      return { success, enabled: ghostTextEnabled };
+    } else {
+      console.log('[GhostText] Shutting down...');
+      shutdownGhostText();
+      return { success: true, enabled: false };
+    }
+  } catch (error) {
+    console.error('[GhostText] Toggle error:', error.message);
+    return { success: false, error: error.message };
+  }
+});
+
+// Hide the overlay (useful when renderer detects certain conditions)
+ipcMain.handle('ghost-text:hide-overlay', async () => {
+  if (ghostTextAddon && ghostTextEnabled) {
+    ghostTextAddon.hideOverlay();
+  }
+  return { success: true };
+});
+
+// ============================================
 // App Lifecycle
 // ============================================
 
 app.whenReady().then(() => {
   createWindow();
+  
+  // Initialize Ghost Text system after window is ready
+  // Delay slightly to ensure everything is loaded
+  setTimeout(() => {
+    try {
+      loadGhostTextAddon();
+      // Don't auto-start monitoring - let user enable it
+      console.log('[GhostText] Addon loaded, ready to enable');
+    } catch (error) {
+      console.error('[GhostText] Failed to load on startup:', error.message);
+    }
+  }, 1000);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -937,7 +1297,15 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  // Cleanup Ghost Text before quitting
+  shutdownGhostText();
+  
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+// Also handle app quit event for cleanup
+app.on('before-quit', () => {
+  shutdownGhostText();
 });

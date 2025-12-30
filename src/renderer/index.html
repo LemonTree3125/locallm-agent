@@ -19,6 +19,162 @@
 </head>
 <body>
   <div class="app-container">
+    
+    <!-- ============================================
+         HOME PAGE
+         ============================================ -->
+    <div id="home-page" class="page home-page active">
+      <div class="home-container">
+        <div class="home-header">
+          <h1>LocalLM Agent</h1>
+          <p class="home-subtitle">Your private AI assistant powered by Ollama</p>
+        </div>
+        
+        <div class="home-cards">
+          <!-- Chat Card -->
+          <div class="home-card" id="home-chat-card">
+            <div class="home-card-icon">💬</div>
+            <h2>Chat</h2>
+            <p>Start a conversation with your local AI models. Supports streaming, vision models, and the AI Council.</p>
+            <button class="btn btn-primary btn-large" id="go-to-chat-btn">Open Chat</button>
+          </div>
+          
+          <!-- Ghost Text Card -->
+          <div class="home-card" id="home-ghost-text-card">
+            <div class="home-card-icon">👻</div>
+            <h2>Ghost Text</h2>
+            <p>System-wide AI completions. Get suggestions while typing in any application — Notepad, Chrome, Discord, and more.</p>
+            <button class="btn btn-secondary btn-large" id="go-to-ghost-text-btn">Configure</button>
+          </div>
+        </div>
+        
+        <div class="home-status">
+          <div id="home-ollama-status" class="status status-checking">
+            <span class="status-dot"></span>
+            <span class="status-text">Checking Ollama...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================
+         GHOST TEXT SETTINGS PAGE
+         ============================================ -->
+    <div id="ghost-text-page" class="page ghost-text-page">
+      <div class="page-header">
+        <button class="btn btn-icon back-btn" id="ghost-text-back-btn" title="Back to Home">←</button>
+        <h1>👻 Ghost Text Settings</h1>
+      </div>
+      
+      <div class="settings-page-content">
+        <div class="settings-card">
+          <div class="settings-card-header">
+            <h2>Enable Ghost Text</h2>
+            <label class="toggle-switch toggle-large">
+              <input type="checkbox" id="ghost-text-enabled">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <p class="settings-card-desc">When enabled, Ghost Text monitors your typing across all Windows applications and provides AI-powered completions.</p>
+          
+          <div id="ghost-text-status" class="ghost-text-status">
+            <span class="status-indicator status-disabled">Disabled</span>
+          </div>
+        </div>
+        
+        <div class="settings-card">
+          <h2>Model Selection</h2>
+          <p class="settings-card-desc">Choose a model for completions. Smaller models are faster but less accurate.</p>
+          
+          <div class="model-selection-grid">
+            <label class="model-option" id="model-option-fast">
+              <input type="radio" name="ghost-text-model" value="qwen3:1.7b" checked>
+              <div class="model-option-content">
+                <div class="model-option-header">
+                  <span class="model-option-name">qwen3:1.7b</span>
+                  <span class="model-option-badge badge-fast">Fast</span>
+                </div>
+                <p class="model-option-desc">Optimized for speed. Best for quick, short completions.</p>
+                <div class="model-option-stats">
+                  <span>~1.7B params</span>
+                  <span>•</span>
+                  <span>~50-100ms latency</span>
+                </div>
+              </div>
+            </label>
+            
+            <label class="model-option" id="model-option-quality">
+              <input type="radio" name="ghost-text-model" value="qwen3:4b">
+              <div class="model-option-content">
+                <div class="model-option-header">
+                  <span class="model-option-name">qwen3:4b</span>
+                  <span class="model-option-badge badge-quality">Quality</span>
+                </div>
+                <p class="model-option-desc">Better understanding and completions. Slightly slower.</p>
+                <div class="model-option-stats">
+                  <span>~4B params</span>
+                  <span>•</span>
+                  <span>~150-300ms latency</span>
+                </div>
+              </div>
+            </label>
+          </div>
+        </div>
+        
+        <div class="settings-card">
+          <h2>How It Works</h2>
+          <div class="how-it-works">
+            <div class="how-it-works-step">
+              <div class="step-number">1</div>
+              <div class="step-content">
+                <h3>Type in any app</h3>
+                <p>Works with Notepad, Chrome, Discord, VS Code, and more.</p>
+              </div>
+            </div>
+            <div class="how-it-works-step">
+              <div class="step-number">2</div>
+              <div class="step-content">
+                <h3>Pause briefly</h3>
+                <p>After ~300ms of inactivity, Ghost Text analyzes your text.</p>
+              </div>
+            </div>
+            <div class="how-it-works-step">
+              <div class="step-number">3</div>
+              <div class="step-content">
+                <h3>See suggestions</h3>
+                <p>A translucent overlay appears with the AI's completion suggestion.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="settings-card settings-card-warning">
+          <h2>⚠️ Requirements</h2>
+          <ul class="requirements-list">
+            <li>
+              <span class="req-icon" id="req-ollama-icon">⏳</span>
+              <span>Ollama must be running</span>
+            </li>
+            <li>
+              <span class="req-icon" id="req-model-icon">⏳</span>
+              <span>Selected model must be installed (<code>ollama pull qwen3:1.7b</code>)</span>
+            </li>
+            <li>
+              <span class="req-icon" id="req-addon-icon">⏳</span>
+              <span>Native addon must be compiled</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================
+         CHAT PAGE (existing content moved here)
+         ============================================ -->
+    <div id="chat-page" class="page chat-page">
+      <!-- Back button for chat page -->
+      <button class="btn btn-icon back-btn chat-back-btn" id="chat-back-btn" title="Back to Home">←</button>
+      
     <!-- Sidebar -->
     <aside class="sidebar">
       <div class="sidebar-header">
@@ -375,6 +531,7 @@
         </div>
       </div>
     </div>
+    </div> <!-- End of chat-page -->
 
     <!-- Help Modal -->
     <div id="help-modal" class="modal" style="display: none;">

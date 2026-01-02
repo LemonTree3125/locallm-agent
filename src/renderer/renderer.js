@@ -2,28 +2,6 @@
 // DOM Elements
 // ============================================
 const elements = {
-  // Pages
-  homePage: document.getElementById('home-page'),
-  chatPage: document.getElementById('chat-page'),
-  ghostTextPage: document.getElementById('ghost-text-page'),
-  
-  // Home Page
-  goToChatBtn: document.getElementById('go-to-chat-btn'),
-  goToGhostTextBtn: document.getElementById('go-to-ghost-text-btn'),
-  homeOllamaStatus: document.getElementById('home-ollama-status'),
-  
-  // Ghost Text Page
-  ghostTextBackBtn: document.getElementById('ghost-text-back-btn'),
-  ghostTextEnabled: document.getElementById('ghost-text-enabled'),
-  ghostTextStatus: document.getElementById('ghost-text-status'),
-  ghostTextModelRadios: document.querySelectorAll('input[name="ghost-text-model"]'),
-  reqOllamaIcon: document.getElementById('req-ollama-icon'),
-  reqModelIcon: document.getElementById('req-model-icon'),
-  reqAddonIcon: document.getElementById('req-addon-icon'),
-  
-  // Chat Page Back Button
-  chatBackBtn: document.getElementById('chat-back-btn'),
-  
   // Sidebar
   modelSelect: document.getElementById('model-select'),
   modelSelectorBtn: document.getElementById('model-selector-btn'),
@@ -71,165 +49,6 @@ const elements = {
   resetSettingsBtn: document.getElementById('reset-settings-btn'),
   applySettingsBtn: document.getElementById('apply-settings-btn'),
 };
-
-// ============================================
-// Page Navigation
-// ============================================
-let currentPage = 'home';
-
-function navigateToPage(pageName) {
-  // Hide all pages
-  document.querySelectorAll('.page').forEach(page => {
-    page.classList.remove('active');
-  });
-  
-  // Show target page
-  const targetPage = document.getElementById(`${pageName}-page`);
-  if (targetPage) {
-    targetPage.classList.add('active');
-    currentPage = pageName;
-  }
-  
-  // Special handling for ghost-text page
-  if (pageName === 'ghost-text') {
-    loadGhostTextConfig();
-    checkGhostTextRequirements();
-  }
-}
-
-// ============================================
-// Ghost Text Configuration
-// ============================================
-let ghostTextConfig = {
-  enabled: false,
-  model: 'qwen3:1.7b',
-  available: false
-};
-
-async function loadGhostTextConfig() {
-  try {
-    const config = await window.electronAPI.ghostTextGetConfig();
-    ghostTextConfig = config;
-    
-    // Update UI
-    elements.ghostTextEnabled.checked = config.enabled;
-    updateGhostTextStatusDisplay(config.enabled);
-    
-    // Update model selection
-    elements.ghostTextModelRadios.forEach(radio => {
-      radio.checked = radio.value === config.model;
-    });
-    
-  } catch (error) {
-    console.error('Failed to load ghost text config:', error);
-  }
-}
-
-function updateGhostTextStatusDisplay(enabled) {
-  const statusEl = elements.ghostTextStatus.querySelector('.status-indicator');
-  if (enabled) {
-    statusEl.textContent = 'Enabled - Monitoring active';
-    statusEl.className = 'status-indicator status-enabled';
-  } else {
-    statusEl.textContent = 'Disabled';
-    statusEl.className = 'status-indicator status-disabled';
-  }
-}
-
-async function toggleGhostText(enabled) {
-  const statusEl = elements.ghostTextStatus.querySelector('.status-indicator');
-  statusEl.textContent = enabled ? 'Starting...' : 'Stopping...';
-  statusEl.className = 'status-indicator status-loading';
-  
-  try {
-    const result = await window.electronAPI.ghostTextToggle(enabled);
-    if (result.success) {
-      ghostTextConfig.enabled = result.enabled;
-      updateGhostTextStatusDisplay(result.enabled);
-    } else {
-      console.error('Failed to toggle ghost text:', result.error);
-      elements.ghostTextEnabled.checked = ghostTextConfig.enabled;
-      updateGhostTextStatusDisplay(ghostTextConfig.enabled);
-    }
-  } catch (error) {
-    console.error('Failed to toggle ghost text:', error);
-    elements.ghostTextEnabled.checked = ghostTextConfig.enabled;
-    updateGhostTextStatusDisplay(ghostTextConfig.enabled);
-  }
-}
-
-async function updateGhostTextModel(model) {
-  try {
-    const result = await window.electronAPI.ghostTextUpdateConfig({ model });
-    if (result.success) {
-      ghostTextConfig.model = result.config.model;
-    } else {
-      console.error('Failed to update ghost text model:', result.error);
-      // Revert UI
-      elements.ghostTextModelRadios.forEach(radio => {
-        radio.checked = radio.value === ghostTextConfig.model;
-      });
-    }
-  } catch (error) {
-    console.error('Failed to update ghost text model:', error);
-  }
-}
-
-async function checkGhostTextRequirements() {
-  // Check Ollama
-  try {
-    const ollamaResult = await window.electronAPI.pingOllama();
-    elements.reqOllamaIcon.textContent = ollamaResult.running ? '✅' : '❌';
-  } catch {
-    elements.reqOllamaIcon.textContent = '❌';
-  }
-  
-  // Check model installed (we'll check if qwen3 models exist)
-  try {
-    const modelsResult = await window.electronAPI.getModels();
-    const hasGhostTextModel = modelsResult.models?.some(m => 
-      m.name.includes('qwen3:1.7b') || m.name.includes('qwen3:4b')
-    );
-    elements.reqModelIcon.textContent = hasGhostTextModel ? '✅' : '❌';
-  } catch {
-    elements.reqModelIcon.textContent = '❌';
-  }
-  
-  // Check addon available
-  try {
-    const config = await window.electronAPI.ghostTextGetConfig();
-    elements.reqAddonIcon.textContent = config.available ? '✅' : '❌';
-  } catch {
-    elements.reqAddonIcon.textContent = '❌';
-  }
-}
-
-// ============================================
-// Navigation Event Listeners
-// ============================================
-function setupNavigationListeners() {
-  // Home page buttons
-  elements.goToChatBtn?.addEventListener('click', () => navigateToPage('chat'));
-  elements.goToGhostTextBtn?.addEventListener('click', () => navigateToPage('ghost-text'));
-  
-  // Back buttons
-  elements.ghostTextBackBtn?.addEventListener('click', () => navigateToPage('home'));
-  elements.chatBackBtn?.addEventListener('click', () => navigateToPage('home'));
-  
-  // Ghost Text toggle
-  elements.ghostTextEnabled?.addEventListener('change', (e) => {
-    toggleGhostText(e.target.checked);
-  });
-  
-  // Ghost Text model selection
-  elements.ghostTextModelRadios?.forEach(radio => {
-    radio.addEventListener('change', (e) => {
-      if (e.target.checked) {
-        updateGhostTextModel(e.target.value);
-      }
-    });
-  });
-}
 
 let isModelDropdownOpen = false;
 
@@ -1821,14 +1640,10 @@ function createCouncilResultMessage(result) {
 // Initialization
 // ============================================
 async function init() {
-  setupNavigationListeners();
   setupEventListeners();
   setupRenameModal();
   await loadSavedChats();
   await checkOllamaStatus();
-  
-  // Update home page Ollama status
-  updateHomeOllamaStatus();
   
   if (state.isOllamaRunning) {
     await loadModels();
@@ -1840,21 +1655,6 @@ async function init() {
     await loadChat(state.savedChats[0].id);
   } else {
     await startNewChat();
-  }
-}
-
-function updateHomeOllamaStatus() {
-  if (!elements.homeOllamaStatus) return;
-  
-  const statusDot = elements.homeOllamaStatus.querySelector('.status-dot');
-  const statusText = elements.homeOllamaStatus.querySelector('.status-text');
-  
-  if (state.isOllamaRunning) {
-    elements.homeOllamaStatus.className = 'status status-connected';
-    statusText.textContent = 'Ollama Connected';
-  } else {
-    elements.homeOllamaStatus.className = 'status status-error';
-    statusText.textContent = 'Ollama Not Running';
   }
 }
 

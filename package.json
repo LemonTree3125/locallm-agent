@@ -5,20 +5,14 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "electron . --enable-logging",
-    "build:native": "cd native && cmake-js compile",
-    "build:native:debug": "cd native && cmake-js compile --debug",
-    "rebuild:native": "cd native && cmake-js rebuild",
-    "clean:native": "cd native && cmake-js clean",
-    "postinstall": "npm run build:native"
+    "dev": "electron . --enable-logging"
   },
   "keywords": [
     "electron",
     "ollama",
     "llm",
     "ai",
-    "chat",
-    "ghost-text"
+    "chat"
   ],
   "author": "",
   "license": "MIT",
@@ -28,8 +22,6 @@
     "ollama": "^0.6.3"
   },
   "devDependencies": {
-    "cmake-js": "^7.4.0",
-    "electron": "^33.2.1",
-    "node-addon-api": "^8.5.0"
+    "electron": "^33.2.1"
   }
 }

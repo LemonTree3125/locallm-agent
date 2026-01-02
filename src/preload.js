@@ -190,34 +190,4 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('council:task-complete');
     ipcRenderer.removeAllListeners('council:tool-call');
   },
-
-  // ============================================
-  // Ghost Text - System-wide Completions
-  // ============================================
-
-  /**
-   * Get Ghost Text configuration
-   * @returns {Promise<{model: string, enabled: boolean, available: boolean}>}
-   */
-  ghostTextGetConfig: () => ipcRenderer.invoke('ghost-text:get-config'),
-
-  /**
-   * Update Ghost Text configuration
-   * @param {object} config - { model?: string, enabled?: boolean }
-   * @returns {Promise<{success: boolean, config?: object, error?: string}>}
-   */
-  ghostTextUpdateConfig: (config) => ipcRenderer.invoke('ghost-text:update-config', config),
-
-  /**
-   * Toggle Ghost Text on/off
-   * @param {boolean} enabled - Whether to enable ghost text
-   * @returns {Promise<{success: boolean, enabled: boolean, error?: string}>}
-   */
-  ghostTextToggle: (enabled) => ipcRenderer.invoke('ghost-text:toggle', enabled),
-
-  /**
-   * Hide the ghost text overlay
-   * @returns {Promise<{success: boolean}>}
-   */
-  ghostTextHideOverlay: () => ipcRenderer.invoke('ghost-text:hide-overlay'),
 });
